@@ -1,0 +1,30 @@
+{
+  "rules": {
+    ".read": false,
+    ".write": false,
+    "projects": {
+      ".read": "auth != null && auth.token.email != null",
+      "$projectId": {
+        ".write": "auth != null && auth.token.email != null"
+      }
+    },
+    "invites": {
+      "$inviteId": {
+        ".read": "auth != null",
+        ".write": "auth != null && auth.token.email != null"
+      }
+    },
+    "responses": {
+      "$inviteId": {
+        ".read": "auth != null && (auth.token.email != null || root.child('invites').child($inviteId).exists())",
+        ".write": "auth != null && (auth.token.email != null || (root.child('invites').child($inviteId).exists() && !data.child('submittedAt').exists()))"
+      }
+    },
+    "followups": {
+      ".read": "auth != null && auth.token.email != null",
+      "$projectId": {
+        ".write": "auth != null && auth.token.email != null"
+      }
+    }
+  }
+}
