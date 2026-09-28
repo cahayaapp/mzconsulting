@@ -67,6 +67,47 @@ function randomToken(bytes = 18) {
 }
 function baseUrl() { return `${location.origin}${location.pathname}`; }
 function inviteUrl(inviteId) { return `${baseUrl()}?invite=${encodeURIComponent(inviteId)}`; }
+async function copyText(text) {
+  if (navigator.clipboard && window.isSecureContext) {
+    await navigator.clipboard.writeText(text);
+    return;
+  }
+  const input = document.createElement('textarea');
+  input.value = text;
+  input.setAttribute('readonly', '');
+  input.style.cssText = 'position:fixed;opacity:0;pointer-events:none';
+  document.body.appendChild(input);
+  input.select();
+  const copied = document.execCommand('copy');
+  input.remove();
+  if (!copied) throw new Error('Copy failed');
+}
+function setButtonLoading(button, loading, label = 'Memproses…') {
+  if (!button) return;
+  if (loading) {
+    button.dataset.label = button.innerHTML;
+    button.disabled = true;
+    button.innerHTML = `<span class="spinner" aria-hidden="true"></span>${label}`;
+  } else {
+    button.disabled = false;
+    if (button.dataset.label) button.innerHTML = button.dataset.label;
+  }
+}
+function mountModal(modal, focusSelector = 'input, textarea, select, button') {
+  document.body.appendChild(modal);
+  document.body.classList.add('modal-open');
+  const close = () => {
+    document.removeEventListener('keydown', onKeydown);
+    document.body.classList.remove('modal-open');
+    modal.remove();
+  };
+  const onKeydown = event => { if (event.key === 'Escape') close(); };
+  document.addEventListener('keydown', onKeydown);
+  modal.addEventListener('mousedown', event => { if (event.target === modal) close(); });
+  modal.querySelectorAll('[data-close]').forEach(btn => btn.addEventListener('click', close));
+  requestAnimationFrame(() => modal.querySelector(focusSelector)?.focus());
+  return close;
+}
 function showToast(message, type = 'ok') {
   toastEl.textContent = message;
   toastEl.className = `toast show ${type === 'error' ? 'error' : ''}`;
@@ -141,9 +182,9 @@ function renderLogin() {
             <div class="eyebrow">Ruang Konsultan</div>
             <h2 style="margin:8px 0 8px">Masuk ke MZ Consulting</h2>
             <p class="lead small">Gunakan akun Email/Password yang dibuat di Firebase Authentication.</p>
-            <div class="form-group"><label>Email</label><input class="input" type="email" id="email" autocomplete="username" required placeholder="email@contoh.com"></div>
-            <div class="form-group"><label>Kata sandi</label><input class="input" type="password" id="password" autocomplete="current-password" required placeholder="••••••••"></div>
-            <button class="btn btn-primary btn-lg" style="width:100%" type="submit">Masuk</button>
+            <div class="form-group"><label for="email">Email</label><input class="input" type="email" id="email" autocomplete="username" required placeholder="email@contoh.com"></div>
+            <div class="form-group"><label for="password">Kata sandi</label><input class="input" type="password" id="password" autocomplete="current-password" required placeholder="••••••••"></div>
+            <button class="btn btn-primary btn-lg" style="width:100%" type="submit" id="loginSubmit">Masuk</button>
             <div id="loginError" class="helper" style="margin-top:12px;color:var(--danger)"></div>
           </div>
         </form>
@@ -155,8 +196,14 @@ function renderLogin() {
     const password = document.querySelector('#password').value;
     const err = document.querySelector('#loginError');
     err.textContent = '';
+    const submit = document.querySelector('#loginSubmit');
+    setButtonLoading(submit, true, 'Memeriksa akun…');
     try { await signInWithEmailAndPassword(auth, email, password); }
-    catch (error) { err.textContent = 'Email atau kata sandi belum cocok. Pastikan akun sudah dibuat di Firebase Authentication.'; }
+    catch (error) {
+      err.textContent = 'Email atau kata sandi belum cocok. Pastikan akun sudah dibuat di Firebase Authentication.';
+      setButtonLoading(submit, false);
+      document.querySelector('#email').focus();
+    }
   });
 }
 
@@ -249,7 +296,7 @@ function projectCardHtml(project) {
   const domains = selectedDomains(project);
   const perspectives = Object.values(project.perspectives || {});
   const done = perspectives.filter(item => item.submittedAt).length;
-  return `<button class="card project-card" data-project="${project.id}" style="width:100%;text-align:left;border:1px solid var(--line)">
+  return `<button type="button" class="card project-card" data-project="${project.id}" style="width:100%;text-align:left;border:1px solid var(--line)">
     <div class="project-letter">${escapeHtml(iconLabel(project.pesantren))}</div>
     <div class="project-main">
       <div class="project-name">${escapeHtml(project.pesantren || project.name)}</div>
@@ -266,23 +313,22 @@ function emptyHtml(title, text, action = '') {
 function openNewProjectModal() {
   const modal = document.createElement('div');
   modal.className = 'modal-backdrop';
-  modal.innerHTML = `<div class="modal">
-    <div class="modal-head"><div><div class="eyebrow">Asesmen baru</div><h2 style="margin:5px 0 0">Mulai dari bidang yang ingin dipahami</h2></div><button class="icon-btn" data-close>×</button></div>
+  modal.innerHTML = `<div class="modal" role="dialog" aria-modal="true" aria-labelledby="newProjectTitle">
+    <div class="modal-head"><div><div class="eyebrow">Asesmen baru</div><h2 id="newProjectTitle" style="margin:5px 0 0">Mulai dari bidang yang ingin dipahami</h2></div><button type="button" class="icon-btn" data-close aria-label="Tutup dialog">×</button></div>
     <form id="newProjectForm">
       <div class="modal-body">
         <div class="grid grid-2">
-          <div class="form-group"><label>Nama pesantren</label><input class="input" id="pesantren" required placeholder="Contoh: Pesantren Al-Hikmah"></div>
-          <div class="form-group"><label>Nama asesmen</label><input class="input" id="assessmentName" value="Asesmen Awal Pesantren" required></div>
+          <div class="form-group"><label for="pesantren">Nama pesantren</label><input class="input" id="pesantren" required placeholder="Contoh: Pesantren Al-Hikmah"></div>
+          <div class="form-group"><label for="assessmentName">Nama asesmen</label><input class="input" id="assessmentName" value="Asesmen Awal Pesantren" required></div>
         </div>
-        <div class="form-group"><label>Periode / waktu asesmen</label><input class="input" id="period" placeholder="Contoh: September 2026"></div>
+        <div class="form-group"><label for="period">Periode / waktu asesmen</label><input class="input" id="period" placeholder="Contoh: September 2026"></div>
         <div class="form-group"><label>Pilih bidang asesmen</label><div class="helper">Pilih hanya yang memang ingin dibahas sekarang. Semua perspektif akan menjawab bidang yang sama agar bisa dibandingkan.</div></div>
         <div class="domain-picker">${DOMAINS.map(domain => `<div class="domain-check"><input type="checkbox" id="domain_${domain.id}" value="${domain.id}" checked><label for="domain_${domain.id}"><div class="domain-code">${domain.code}</div><div class="domain-title">${escapeHtml(domain.title)}</div><div class="domain-desc">${escapeHtml(domain.subtitle)}</div></label></div>`).join('')}</div>
       </div>
       <div class="modal-foot"><button type="button" class="btn btn-ghost" data-close>Batal</button><button type="submit" class="btn btn-primary">Buat asesmen</button></div>
     </form>
   </div>`;
-  document.body.appendChild(modal);
-  modal.querySelectorAll('[data-close]').forEach(btn => btn.addEventListener('click', () => modal.remove()));
+  const closeModal = mountModal(modal, '#pesantren');
   modal.querySelector('#newProjectForm').addEventListener('submit', async event => {
     event.preventDefault();
     const domains = [...modal.querySelectorAll('.domain-check input:checked')].map(el => el.value);
@@ -298,10 +344,18 @@ function openNewProjectModal() {
       engagementStatus: 'Belum dibahas',
       analysisNote: ''
     };
-    await set(projectRef, project);
-    modal.remove();
-    showToast('Asesmen dibuat. Sekarang tambahkan perspektif.');
-    await renderProject(projectRef.key, 'perspectives');
+    const submit = event.submitter;
+    setButtonLoading(submit, true, 'Membuat…');
+    try {
+      await set(projectRef, project);
+      closeModal();
+      showToast('Asesmen dibuat. Sekarang tambahkan perspektif.');
+      await renderProject(projectRef.key, 'perspectives');
+    } catch (error) {
+      console.error(error);
+      setButtonLoading(submit, false);
+      showToast('Asesmen belum berhasil dibuat. Periksa koneksi lalu coba lagi.', 'error');
+    }
   });
 }
 
@@ -499,8 +553,10 @@ function bindProjectTab(projectId, project, bundle, analytics, tab) {
     document.querySelector('#addPerspectiveBtn')?.addEventListener('click', () => openPerspectiveModal(projectId, project));
     document.querySelector('#addPerspectiveEmpty')?.addEventListener('click', () => openPerspectiveModal(projectId, project));
     document.querySelectorAll('[data-copy-link]').forEach(btn => btn.addEventListener('click', async () => {
-      await navigator.clipboard.writeText(inviteUrl(btn.dataset.copyLink));
-      showToast('Tautan asesmen disalin.');
+      try {
+        await copyText(inviteUrl(btn.dataset.copyLink));
+        showToast('Tautan asesmen disalin.');
+      } catch (_) { showToast('Tautan belum dapat disalin. Silakan salin langsung dari kolom tautan.', 'error'); }
     }));
     document.querySelectorAll('[data-delete-perspective]').forEach(btn => btn.addEventListener('click', async () => {
       if (!confirm('Hapus perspektif ini? Jawaban yang sudah tersimpan juga akan dihapus.')) return;
@@ -565,9 +621,8 @@ function renderCharts(project, analytics) {
 function openPerspectiveModal(projectId, project) {
   const modal = document.createElement('div');
   modal.className = 'modal-backdrop';
-  modal.innerHTML = `<div class="modal" style="max-width:560px"><div class="modal-head"><div><div class="eyebrow">Perspektif baru</div><h2 style="margin:5px 0 0">Siapa yang akan mengisi?</h2></div><button class="icon-btn" data-close>×</button></div><form id="perspectiveForm"><div class="modal-body"><div class="form-group"><label>Jabatan / perspektif</label><input class="input" id="perspectiveLabel" required placeholder="Contoh: Direktur, Kepala Sekolah, Kepala Asrama"></div><div class="form-group"><label>Nama responden <span class="muted" style="font-weight:500">(opsional)</span></label><input class="input" id="perspectiveName" placeholder="Boleh dikosongkan"></div><p class="helper">Responden akan menerima ${selectedDomains(project).length * 10} pertanyaan (${selectedDomains(project).length} bidang × 10 pertanyaan). Ia tidak perlu membuat akun; cukup membuka tautan pribadi.</p></div><div class="modal-foot"><button type="button" class="btn btn-ghost" data-close>Batal</button><button class="btn btn-primary" type="submit">Buat tautan</button></div></form></div>`;
-  document.body.appendChild(modal);
-  modal.querySelectorAll('[data-close]').forEach(btn => btn.addEventListener('click', () => modal.remove()));
+  modal.innerHTML = `<div class="modal" style="max-width:560px" role="dialog" aria-modal="true" aria-labelledby="perspectiveTitle"><div class="modal-head"><div><div class="eyebrow">Perspektif baru</div><h2 id="perspectiveTitle" style="margin:5px 0 0">Siapa yang akan mengisi?</h2></div><button type="button" class="icon-btn" data-close aria-label="Tutup dialog">×</button></div><form id="perspectiveForm"><div class="modal-body"><div class="form-group"><label for="perspectiveLabel">Jabatan / perspektif</label><input class="input" id="perspectiveLabel" required placeholder="Contoh: Direktur, Kepala Sekolah, Kepala Asrama"></div><div class="form-group"><label for="perspectiveName">Nama responden <span class="muted" style="font-weight:500">(opsional)</span></label><input class="input" id="perspectiveName" placeholder="Boleh dikosongkan"></div><p class="helper">Responden akan menerima ${selectedDomains(project).length * 10} pertanyaan (${selectedDomains(project).length} bidang × 10 pertanyaan). Ia tidak perlu membuat akun; cukup membuka tautan pribadi.</p></div><div class="modal-foot"><button type="button" class="btn btn-ghost" data-close>Batal</button><button class="btn btn-primary" type="submit">Buat tautan</button></div></form></div>`;
+  const closeModal = mountModal(modal, '#perspectiveLabel');
   modal.querySelector('#perspectiveForm').addEventListener('submit', async event => {
     event.preventDefault();
     const perspectiveRef = push(ref(db, `projects/${projectId}/perspectives`));
@@ -579,11 +634,19 @@ function openPerspectiveModal(projectId, project) {
     const updates = {};
     updates[`projects/${projectId}/perspectives/${perspectiveRef.key}`] = perspective;
     updates[`invites/${inviteId}`] = invite;
-    await update(ref(db), updates);
-    modal.remove();
-    await navigator.clipboard.writeText(inviteUrl(inviteId)).catch(() => {});
-    showToast('Tautan perspektif dibuat dan disalin.');
-    renderProject(projectId, 'perspectives');
+    const submit = event.submitter;
+    setButtonLoading(submit, true, 'Membuat tautan…');
+    try {
+      await update(ref(db), updates);
+      closeModal();
+      const copied = await copyText(inviteUrl(inviteId)).then(() => true).catch(() => false);
+      showToast(copied ? 'Tautan perspektif dibuat dan disalin.' : 'Tautan perspektif berhasil dibuat.');
+      renderProject(projectId, 'perspectives');
+    } catch (error) {
+      console.error(error);
+      setButtonLoading(submit, false);
+      showToast('Tautan belum berhasil dibuat. Periksa koneksi lalu coba lagi.', 'error');
+    }
   });
 }
 
@@ -603,16 +666,23 @@ function bindFollowups(projectId) {
 function openFollowupModal(projectId) {
   const modal = document.createElement('div');
   modal.className = 'modal-backdrop';
-  modal.innerHTML = `<div class="modal" style="max-width:620px"><div class="modal-head"><div><div class="eyebrow">Tindak lanjut baru</div><h2 style="margin:5px 0 0">Apa yang akan dikerjakan?</h2></div><button class="icon-btn" data-close>×</button></div><form id="followupForm"><div class="modal-body"><div class="form-group"><label>Judul</label><input class="input" id="followTitle" required placeholder="Contoh: Perjelas batas kewenangan kepala unit"></div><div class="form-group"><label>Langkah yang disepakati</label><textarea class="textarea" id="followAction" required placeholder="Tuliskan tindakan yang konkret dan realistis"></textarea></div><div class="grid grid-2"><div class="form-group"><label>PIC</label><input class="input" id="followOwner" placeholder="Jabatan / nama"></div><div class="form-group"><label>Target</label><input class="input" type="date" id="followDate"></div></div></div><div class="modal-foot"><button type="button" class="btn btn-ghost" data-close>Batal</button><button class="btn btn-primary" type="submit">Simpan</button></div></form></div>`;
-  document.body.appendChild(modal);
-  modal.querySelectorAll('[data-close]').forEach(btn => btn.addEventListener('click', () => modal.remove()));
+  modal.innerHTML = `<div class="modal" style="max-width:620px" role="dialog" aria-modal="true" aria-labelledby="followupTitle"><div class="modal-head"><div><div class="eyebrow">Tindak lanjut baru</div><h2 id="followupTitle" style="margin:5px 0 0">Apa yang akan dikerjakan?</h2></div><button type="button" class="icon-btn" data-close aria-label="Tutup dialog">×</button></div><form id="followupForm"><div class="modal-body"><div class="form-group"><label for="followTitle">Judul</label><input class="input" id="followTitle" required placeholder="Contoh: Perjelas batas kewenangan kepala unit"></div><div class="form-group"><label for="followAction">Langkah yang disepakati</label><textarea class="textarea" id="followAction" required placeholder="Tuliskan tindakan yang konkret dan realistis"></textarea></div><div class="grid grid-2"><div class="form-group"><label for="followOwner">PIC</label><input class="input" id="followOwner" placeholder="Jabatan / nama"></div><div class="form-group"><label for="followDate">Target</label><input class="input" type="date" id="followDate"></div></div></div><div class="modal-foot"><button type="button" class="btn btn-ghost" data-close>Batal</button><button class="btn btn-primary" type="submit">Simpan</button></div></form></div>`;
+  const closeModal = mountModal(modal, '#followTitle');
   modal.querySelector('#followupForm').addEventListener('submit', async event => {
     event.preventDefault();
     const followRef = push(ref(db, `followups/${projectId}`));
-    await set(followRef, { title: modal.querySelector('#followTitle').value.trim(), action: modal.querySelector('#followAction').value.trim(), owner: modal.querySelector('#followOwner').value.trim(), targetDate: modal.querySelector('#followDate').value, status: 'Rencana', createdAt: now() });
-    modal.remove();
-    showToast('Tindak lanjut ditambahkan.');
-    renderProject(projectId, 'followup');
+    const submit = event.submitter;
+    setButtonLoading(submit, true, 'Menyimpan…');
+    try {
+      await set(followRef, { title: modal.querySelector('#followTitle').value.trim(), action: modal.querySelector('#followAction').value.trim(), owner: modal.querySelector('#followOwner').value.trim(), targetDate: modal.querySelector('#followDate').value, status: 'Rencana', createdAt: now() });
+      closeModal();
+      showToast('Tindak lanjut ditambahkan.');
+      renderProject(projectId, 'followup');
+    } catch (error) {
+      console.error(error);
+      setButtonLoading(submit, false);
+      showToast('Tindak lanjut belum tersimpan. Periksa koneksi lalu coba lagi.', 'error');
+    }
   });
 }
 
@@ -650,7 +720,7 @@ function renderRespondentQuestion() {
       <div class="respondent-head"><div class="container"><div class="topbar-inner" style="height:auto"><div class="brand"><div class="brand-mark">MZ</div><div><div class="brand-title" style="color:white">MZ Consulting</div><div class="brand-sub">Asesmen Awal Pesantren</div></div></div><div class="save-state">Jawaban tersimpan online</div></div></div></div>
       <div class="respondent-wrap">
         <div class="respondent-card">
-          <div class="respondent-meta"><div><div class="eyebrow">${escapeHtml(invite.assessmentName || 'Asesmen Awal')}</div><h2 style="margin:5px 0 5px">${escapeHtml(invite.pesantren)}</h2><div class="small muted">Perspektif: <strong>${escapeHtml(invite.perspectiveLabel)}</strong>${invite.period ? ` · ${escapeHtml(invite.period)}` : ''}</div></div><div style="min-width:180px"><label>Nama pengisi <span class="muted" style="font-weight:500">(opsional)</span></label><input class="input" id="respondentName" value="${escapeHtml(response.respondentName || '')}" placeholder="Nama"></div></div>
+          <div class="respondent-meta"><div><div class="eyebrow">${escapeHtml(invite.assessmentName || 'Asesmen Awal')}</div><h2 style="margin:5px 0 5px">${escapeHtml(invite.pesantren)}</h2><div class="small muted">Perspektif: <strong>${escapeHtml(invite.perspectiveLabel)}</strong>${invite.period ? ` · ${escapeHtml(invite.period)}` : ''}</div></div><div style="min-width:180px"><label for="respondentName">Nama pengisi <span class="muted" style="font-weight:500">(opsional)</span></label><input class="input" id="respondentName" value="${escapeHtml(response.respondentName || '')}" placeholder="Nama"></div></div>
           <div class="progress-wrap"><div style="display:flex;justify-content:space-between;font-size:12px;color:var(--muted);margin-bottom:7px"><span>${answeredCount} dari ${questions.length} terjawab</span><span>${progress}%</span></div><div class="progress-line"><div class="progress-bar" style="width:${progress}%"></div></div></div>
           <div class="question-pane">
             <span class="badge neutral">${question.domainCode} · ${escapeHtml(question.domainTitle)}</span>
@@ -660,7 +730,7 @@ function renderRespondentQuestion() {
               const selected = answer && ((option.value === null && answer.unsure) || answer.score === option.value);
               return `<button class="answer-btn ${selected ? 'selected' : ''}" data-answer="${option.value === null ? 'unsure' : option.value}"><span class="answer-num">${option.value === null ? '?' : option.value}</span><span>${escapeHtml(option.label)}</span></button>`;
             }).join('')}</div>
-            <div class="question-note"><label>Catatan singkat <span class="muted" style="font-weight:500">(opsional)</span></label><textarea class="textarea" id="answerNote" placeholder="Contoh, kondisi, atau penjelasan yang ingin ditambahkan…">${escapeHtml(answer?.note || '')}</textarea></div>
+            <div class="question-note"><label for="answerNote">Catatan singkat <span class="muted" style="font-weight:500">(opsional)</span></label><textarea class="textarea" id="answerNote" placeholder="Contoh, kondisi, atau penjelasan yang ingin ditambahkan…">${escapeHtml(answer?.note || '')}</textarea></div>
           </div>
           <div class="respondent-nav"><button class="btn btn-ghost" id="prevQ" ${index === 0 ? 'disabled' : ''}>← Sebelumnya</button>${isLast ? `<button class="btn btn-primary" id="submitAssessment">Kirim jawaban</button>` : `<button class="btn btn-primary" id="nextQ">Berikutnya →</button>`}</div>
         </div>
@@ -758,4 +828,3 @@ async function renderProject(projectId, tab = state.currentTab || 'overview') {
   document.querySelectorAll('[data-tab]').forEach(btn => btn.addEventListener('click', () => renderProject(projectId, btn.dataset.tab)));
   bindProjectTab(projectId, project, bundle, analytics, tab);
 }
-
