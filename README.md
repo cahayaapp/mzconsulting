@@ -1,4 +1,4 @@
-# MZ Consulting — Asesmen Awal Pesantren
+# MZ Consulting — Sahabat Tumbuh Pesantren
 
 Versi sederhana untuk asesmen multiperspektif berbasis GitHub Pages + Firebase Realtime Database.
 

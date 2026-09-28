@@ -161,7 +161,7 @@ function renderLogin() {
       <section class="login-hero">
         <div class="login-logo">
           <div class="brand-mark">MZ</div>
-          <div><div style="font-weight:850">MZ Consulting</div><div style="font-size:12px;color:rgba(255,255,255,.66)">Asesmen Awal Pesantren</div></div>
+          <div><div style="font-weight:850">MZ Consulting</div><div style="font-size:12px;color:rgba(255,255,255,.66)">Sahabat Tumbuh Pesantren</div></div>
         </div>
         <div class="login-copy">
           <div class="eyebrow" style="color:#d6b36a">Diagnosis awal yang sederhana</div>
@@ -174,7 +174,7 @@ function renderLogin() {
             <span class="hero-point">Tindak lanjut terarah</span>
           </div>
         </div>
-        <div style="font-size:12px;color:rgba(255,255,255,.48)">Menata Sistem. Menguatkan SDM. Menjaga Ruh Pesantren.</div>
+        <div style="font-size:12px;color:rgba(255,255,255,.48)">MZ Consulting — Sahabat Tumbuh Pesantren</div>
       </section>
       <section class="login-form-wrap">
         <form id="loginForm" class="login-form">
@@ -215,7 +215,7 @@ function consultantShell(content) {
         <div class="container topbar-inner">
           <button class="brand" id="homeBrand" style="background:none;border:0;padding:0;text-align:left;cursor:pointer">
             <div class="brand-mark">MZ</div>
-            <div><div class="brand-title">MZ Consulting</div><div class="brand-sub">Asesmen Awal Pesantren</div></div>
+            <div><div class="brand-title">MZ Consulting</div><div class="brand-sub">Sahabat Tumbuh Pesantren</div></div>
           </button>
           <div class="top-actions">
             <span class="small muted hide-mobile">${escapeHtml(state.user?.email || '')}</span>
@@ -717,7 +717,7 @@ function renderRespondentQuestion() {
 
   appEl.innerHTML = `
     <div class="respondent-shell">
-      <div class="respondent-head"><div class="container"><div class="topbar-inner" style="height:auto"><div class="brand"><div class="brand-mark">MZ</div><div><div class="brand-title" style="color:white">MZ Consulting</div><div class="brand-sub">Asesmen Awal Pesantren</div></div></div><div class="save-state">Jawaban tersimpan online</div></div></div></div>
+      <div class="respondent-head"><div class="container"><div class="topbar-inner" style="height:auto"><div class="brand"><div class="brand-mark">MZ</div><div><div class="brand-title" style="color:white">MZ Consulting</div><div class="brand-sub">Sahabat Tumbuh Pesantren</div></div></div><div class="save-state">Jawaban tersimpan online</div></div></div></div>
       <div class="respondent-wrap">
         <div class="respondent-card">
           <div class="respondent-meta"><div><div class="eyebrow">${escapeHtml(invite.assessmentName || 'Asesmen Awal')}</div><h2 style="margin:5px 0 5px">${escapeHtml(invite.pesantren)}</h2><div class="small muted">Perspektif: <strong>${escapeHtml(invite.perspectiveLabel)}</strong>${invite.period ? ` · ${escapeHtml(invite.period)}` : ''}</div></div><div style="min-width:180px"><label for="respondentName">Nama pengisi <span class="muted" style="font-weight:500">(opsional)</span></label><input class="input" id="respondentName" value="${escapeHtml(response.respondentName || '')}" placeholder="Nama"></div></div>
@@ -783,7 +783,7 @@ async function saveRespondentResponse() {
 
 function renderRespondentComplete() {
   const invite = state.respondent.invite;
-  appEl.innerHTML = `<div class="respondent-shell"><div class="respondent-head"><div class="container"><div class="brand"><div class="brand-mark">MZ</div><div><div class="brand-title" style="color:white">MZ Consulting</div><div class="brand-sub">Asesmen Awal Pesantren</div></div></div></div></div><div class="respondent-wrap"><div class="respondent-card"><div class="complete-box"><div class="complete-mark">✓</div><div class="eyebrow">Jawaban sudah terkirim</div><h2 style="margin-top:8px">Terima kasih atas perspektif Anda.</h2><p class="lead" style="margin-left:auto;margin-right:auto">Jawaban untuk <strong>${escapeHtml(invite?.pesantren || '')}</strong> sudah tersimpan. Hasilnya akan dibaca bersama perspektif lain sebagai bahan analisis awal.</p><p class="helper">Asesmen ini bukan ujian dan bukan penilaian pribadi. Perbedaan pandangan justru membantu menemukan hal yang perlu dibahas.</p></div></div></div></div>`;
+  appEl.innerHTML = `<div class="respondent-shell"><div class="respondent-head"><div class="container"><div class="brand"><div class="brand-mark">MZ</div><div><div class="brand-title" style="color:white">MZ Consulting</div><div class="brand-sub">Sahabat Tumbuh Pesantren</div></div></div></div></div><div class="respondent-wrap"><div class="respondent-card"><div class="complete-box"><div class="complete-mark">✓</div><div class="eyebrow">Jawaban sudah terkirim</div><h2 style="margin-top:8px">Terima kasih atas perspektif Anda.</h2><p class="lead" style="margin-left:auto;margin-right:auto">Jawaban untuk <strong>${escapeHtml(invite?.pesantren || '')}</strong> sudah tersimpan. Hasilnya akan dibaca bersama perspektif lain sebagai bahan analisis awal.</p><p class="helper">Asesmen ini bukan ujian dan bukan penilaian pribadi. Perbedaan pandangan justru membantu menemukan hal yang perlu dibahas.</p></div></div></div></div>`;
 }
 
 /* sync submitted flags lazily for consultant */
