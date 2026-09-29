@@ -27,7 +27,9 @@ import {
 
 const appEl = document.querySelector('#app');
 const toastEl = document.querySelector('#toast');
-const inviteFromUrl = new URLSearchParams(location.search).get('invite');
+const pageParams = new URLSearchParams(location.search);
+const inviteFromUrl = pageParams.get('invite');
+const clientProjectFromUrl = pageParams.get('clientProject');
 
 const state = {
   user: null,
@@ -196,9 +198,16 @@ onAuthStateChanged(auth, async user => {
       renderLogin(`Akun berhasil masuk ke Firebase ${FIREBASE_ENVIRONMENT.name}, tetapi profil pengguna belum tersedia di database. Hubungi Admin. [profile/not-found]`);
       return;
     }
+    if (state.userProfile.role === 'client' && clientProjectFromUrl) {
+      await renderClientPortal(clientProjectFromUrl);
+      return;
+    }
     if (!['admin', 'consultant'].includes(state.userProfile.role)) {
       await signOut(auth);
-      renderLogin(`Role ${state.userProfile.role || 'tidak dikenal'} tidak memiliki akses ke dashboard Admin/Consultant. [profile/role-not-allowed]`);
+      const message = state.userProfile.role === 'client'
+        ? 'Gunakan tautan Prioritas Transformasi yang dibagikan konsultan untuk membuka hasil publikasi. [client/project-link-required]'
+        : `Role ${state.userProfile.role || 'tidak dikenal'} tidak memiliki akses ke dashboard Admin/Consultant. [profile/role-not-allowed]`;
+      renderLogin(message);
       return;
     }
     await renderDashboard();
@@ -237,7 +246,7 @@ function renderLogin(initialError = '') {
       <section class="login-form-wrap">
         <form id="loginForm" class="login-form">
           <div class="card">
-            <div class="login-card-head"><div class="eyebrow">Ruang Konsultan</div>${environmentBadgeHtml()}</div>
+            <div class="login-card-head"><div class="eyebrow">${clientProjectFromUrl ? 'Ruang Klien' : 'Ruang Konsultan'}</div>${environmentBadgeHtml()}</div>
             <h2 style="margin:8px 0 8px">Masuk ke MZ Consulting</h2>
             <p class="lead small">Gunakan akun Email/Password yang dibuat di Firebase Authentication.</p>
             <div class="form-group"><label for="email">Email</label><input class="input" type="email" id="email" autocomplete="username" required placeholder="email@contoh.com"></div>
@@ -264,6 +273,27 @@ function renderLogin(initialError = '') {
       setButtonLoading(submit, false);
     }
   });
+}
+
+async function renderClientPortal(projectId) {
+  destroyCharts();
+  const published = await withTimeout(safeGet(`clientViews/${projectId}`));
+  if (!published) throw Object.assign(new Error('Hasil transformasi belum dipublikasikan untuk akun ini.'), { code: 'database/permission-denied' });
+  const priorities = toArray(published.priorities);
+  appEl.innerHTML = `
+    <div class="app-shell">
+      <header class="topbar"><div class="container topbar-inner">
+        <div class="brand"><div class="brand-mark">MZ</div><div><div class="brand-title">MZ Consulting</div><div class="brand-sub">Sahabat Tumbuh Pesantren</div></div></div>
+        <div class="top-actions">${environmentBadgeHtml()}<span class="small muted hide-mobile">client · ${escapeHtml(state.user?.email || '')}</span><button class="btn btn-ghost btn-sm" id="logoutBtn">Keluar</button></div>
+      </div></header>
+      <main class="page"><div class="container">
+        <section class="hero-panel"><div class="eyebrow" style="color:#d6b36a">Prioritas Transformasi</div><h1 style="margin-top:8px">${escapeHtml(published.project?.pesantren || published.project?.name || 'Rencana Transformasi')}</h1><p class="lead">Hasil yang sudah divalidasi dan dipublikasikan oleh konsultan.</p></section>
+        <section class="card card-pad" style="margin-top:18px">
+          ${priorities.length ? priorities.map((item, index) => `<article class="client-priority"><div class="eyebrow">Prioritas ${index + 1}</div><h3>${escapeHtml(item.title)}</h3><p><strong>Mengapa:</strong> ${escapeHtml(item.reason)}</p><p><strong>Target awal:</strong> ${escapeHtml(item.target_window || 'Disepakati bersama')}</p><span class="badge neutral">${escapeHtml(item.status || 'Belum dimulai')}</span></article>`).join('') : emptyHtml('Belum ada prioritas tervalidasi', 'Konsultan belum memublikasikan prioritas transformasi untuk project ini.')}
+        </section>
+      </div></main>
+    </div>`;
+  document.querySelector('#logoutBtn')?.addEventListener('click', () => signOut(auth));
 }
 
 /* ---------------- Consultant shell ---------------- */
