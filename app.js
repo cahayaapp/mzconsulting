@@ -1,6 +1,15 @@
 import { auth, db } from './firebase-config.js';
 import { DOMAINS, SCALE_OPTIONS, getStage, getQuestion, getDomain } from './questions.js';
 import {
+  buildFindings,
+  buildRoadmap,
+  clientProjection,
+  nextJourneyStep,
+  questionIndicatorMap,
+  recommendPlaybooks,
+  snapshotValidatedRecommendation
+} from './lib/solution-engine.js';
+import {
   signInWithEmailAndPassword,
   signOut,
   onAuthStateChanged,
@@ -21,9 +30,11 @@ const inviteFromUrl = new URLSearchParams(location.search).get('invite');
 
 const state = {
   user: null,
+  userProfile: null,
   projects: {},
   currentProjectId: null,
   currentTab: 'overview',
+  knowledgeBase: null,
   charts: [],
   respondent: {
     inviteId: inviteFromUrl,
@@ -129,6 +140,14 @@ async function safeGet(path) {
   return snap.exists() ? snap.val() : null;
 }
 
+async function loadKnowledgeBase() {
+  if (state.knowledgeBase) return state.knowledgeBase;
+  const response = await fetch('./data/knowledge-base.v1.json');
+  if (!response.ok) throw new Error('Knowledge base tidak dapat dimuat.');
+  state.knowledgeBase = await response.json();
+  return state.knowledgeBase;
+}
+
 /* ---------------- Auth ---------------- */
 onAuthStateChanged(auth, async user => {
   state.user = user;
@@ -168,7 +187,7 @@ function renderLogin() {
           <h1>Pahami posisi pesantren sebelum menentukan langkah.</h1>
           <p>Pilih bidang yang ingin dilihat, kumpulkan perspektif pimpinan dan pengelola, bandingkan hasilnya, lalu gunakan data itu sebagai bahan percakapan dan pendampingan.</p>
           <div class="hero-points">
-            <span class="hero-point">9 bidang asesmen</span>
+            <span class="hero-point">10 bidang asesmen</span>
             <span class="hero-point">10 pertanyaan per bidang</span>
             <span class="hero-point">Multiperspektif</span>
             <span class="hero-point">Tindak lanjut terarah</span>
@@ -218,6 +237,8 @@ function consultantShell(content) {
             <div><div class="brand-title">MZ Consulting</div><div class="brand-sub">Sahabat Tumbuh Pesantren</div></div>
           </button>
           <div class="top-actions">
+            <button class="btn btn-ghost btn-sm hide-mobile" id="toolkitLibraryBtn">Toolkit</button>
+            <button class="btn btn-ghost btn-sm hide-mobile" id="knowledgeBaseBtn">Knowledge Base</button>
             <span class="small muted hide-mobile">${escapeHtml(state.user?.email || '')}</span>
             <button class="btn btn-ghost btn-sm" id="logoutBtn">Keluar</button>
           </div>
@@ -228,11 +249,22 @@ function consultantShell(content) {
 }
 function bindShell() {
   document.querySelector('#homeBrand')?.addEventListener('click', () => renderDashboard());
+  document.querySelector('#toolkitLibraryBtn')?.addEventListener('click', renderToolkitLibrary);
+  document.querySelector('#knowledgeBaseBtn')?.addEventListener('click', renderKnowledgeBaseAdmin);
   document.querySelector('#logoutBtn')?.addEventListener('click', () => signOut(auth));
 }
 
 async function loadProjects() {
-  state.projects = (await safeGet('projects')) || {};
+  state.userProfile = await safeGet(`users/${state.user.uid}`).catch(() => null);
+  if (state.userProfile?.role === 'admin') {
+    state.projects = (await safeGet('projects')) || {};
+  } else {
+    const ownIndex = (await safeGet(`userProjects/${state.user.uid}`)) || {};
+    const tenantIndex = state.userProfile?.tenantId ? (await safeGet(`tenantProjects/${state.userProfile.tenantId}`)) || {} : {};
+    const index = { ...ownIndex, ...tenantIndex };
+    const entries = await Promise.all(Object.keys(index).map(async id => [id, await safeGet(`projects/${id}`)]));
+    state.projects = Object.fromEntries(entries.filter(([, project]) => project));
+  }
   return state.projects;
 }
 
@@ -334,6 +366,7 @@ function openNewProjectModal() {
     const domains = [...modal.querySelectorAll('.domain-check input:checked')].map(el => el.value);
     if (!domains.length) return showToast('Pilih minimal satu bidang asesmen.', 'error');
     const projectRef = push(ref(db, 'projects'));
+    const tenantId = state.userProfile?.tenantId || state.user.uid;
     const project = {
       name: modal.querySelector('#assessmentName').value.trim(),
       pesantren: modal.querySelector('#pesantren').value.trim(),
@@ -341,13 +374,19 @@ function openNewProjectModal() {
       domains,
       createdAt: now(),
       createdBy: state.user.uid,
+      tenantId,
+      members: { [state.user.uid]: { role: 'consultant', addedAt: now() } },
       engagementStatus: 'Belum dibahas',
       analysisNote: ''
     };
     const submit = event.submitter;
     setButtonLoading(submit, true, 'Membuat…');
     try {
-      await set(projectRef, project);
+      const createUpdates = {};
+      createUpdates[`projects/${projectRef.key}`] = project;
+      createUpdates[`userProjects/${state.user.uid}/${projectRef.key}`] = true;
+      createUpdates[`tenantProjects/${tenantId}/${projectRef.key}`] = true;
+      await update(ref(db), createUpdates);
       closeModal();
       showToast('Asesmen dibuat. Sekarang tambahkan perspektif.');
       await renderProject(projectRef.key, 'perspectives');
@@ -431,6 +470,7 @@ function renderProjectTab(projectId, project, bundle, analytics, tab) {
   if (tab === 'compare') return compareHtml(project, analytics);
   if (tab === 'recommendations') return recommendationsHtml(project, analytics);
   if (tab === 'followup') return `<div id="followupSlot"><div class="card card-pad">Memuat tindak lanjut…</div></div>`;
+  if (tab === 'transformation') return `<div id="transformationSlot"><div class="card card-pad"><span class="spinner spinner-dark" aria-hidden="true"></span> Menyusun rekomendasi berbasis playbook…</div></div>`;
   return overviewHtml(project, analytics);
 }
 
@@ -591,6 +631,7 @@ function bindProjectTab(projectId, project, bundle, analytics, tab) {
       bindFollowups(projectId);
     });
   }
+  if (tab === 'transformation') renderTransformationPlan(projectId, project, analytics);
 }
 
 function renderCharts(project, analytics) {
@@ -684,6 +725,313 @@ function openFollowupModal(projectId) {
       showToast('Tindak lanjut belum tersimpan. Periksa koneksi lalu coba lagi.', 'error');
     }
   });
+}
+
+/* ---------------- Transformation knowledge base ---------------- */
+async function getTransformationContext(projectId, analytics) {
+  const knowledgeBase = await loadKnowledgeBase();
+  const stored = (await safeGet(`projectTransformations/${projectId}`)) || {};
+  const indicatorMap = questionIndicatorMap(DOMAINS);
+  const findings = buildFindings(analytics.questionStats, indicatorMap);
+  const statusByCode = Object.fromEntries(Object.entries(stored.recommendations || {}).map(([code, item]) => [code, item.status]));
+  const generated = recommendPlaybooks({ knowledgeBase, findings, existingStatuses: statusByCode });
+  const recommendations = generated.map(item => ({ ...item, ...(stored.recommendations?.[item.playbook_code] || {}) }));
+  const updates = {};
+  if (!stored.schemaVersion) {
+    updates[`projectTransformations/${projectId}/schemaVersion`] = '1.0';
+    updates[`projectTransformations/${projectId}/knowledgeBaseVersion`] = knowledgeBase.knowledge_base_version;
+    updates[`projectTransformations/${projectId}/createdAt`] = now();
+  }
+  findings.forEach(item => {
+    if (!stored.findings?.[item.id]) updates[`projectTransformations/${projectId}/findings/${item.id}`] = item;
+  });
+  generated.forEach(item => {
+    if (!stored.recommendations?.[item.playbook_code]) updates[`projectTransformations/${projectId}/recommendations/${item.playbook_code}`] = item;
+  });
+  if (Object.keys(updates).length) await update(ref(db), updates);
+  return { knowledgeBase, stored: { ...stored, findings: stored.findings || Object.fromEntries(findings.map(item => [item.id, item])) }, findings, recommendations };
+}
+
+function priorityBadge(priority) {
+  const labels = { P0: 'P0 · Respons sekarang', P1: 'P1 · Fondasi', P2: 'P2 · Penguatan', P3: 'P3 · Optimasi' };
+  return `<span class="priority-badge ${priority.toLowerCase()}">${labels[priority] || priority}</span>`;
+}
+
+function recommendationCardHtml(item) {
+  const statusLabel = (item.validation_status || item.status || 'SYSTEM_SUGGESTED').replaceAll('_', ' ');
+  return `<article class="card solution-card" data-recommendation-card="${escapeHtml(item.playbook_code)}">
+    <div class="solution-top"><div><div class="eyebrow">${escapeHtml(item.playbook_code)} · v${escapeHtml(item.playbook_version)}</div><h3>${escapeHtml(item.title)}</h3></div>${priorityBadge(item.priority)}</div>
+    <p class="reco-action">${escapeHtml(item.reason)}</p>
+    <div class="solution-signals"><span class="badge neutral">Confidence ${escapeHtml(item.confidence)}</span><span class="badge ${item.validation_status === 'VALIDATED' ? 'success' : 'neutral'}">${escapeHtml(statusLabel)}</span>${item.evidence_warning ? '<span class="badge warn">Bukti perlu diperkuat</span>' : ''}</div>
+    ${item.missing_dependencies?.length ? `<div class="dependency-note"><strong>Prasyarat:</strong> ${item.missing_dependencies.map(escapeHtml).join(', ')}</div>` : ''}
+    <div class="solution-actions"><button class="btn btn-ghost btn-sm" data-open-playbook="${item.playbook_code}">Buka playbook</button>${item.validation_status === 'VALIDATED' ? `<button class="btn btn-primary btn-sm" data-add-roadmap="${item.playbook_code}">Tambah ke roadmap</button>` : `<button class="btn btn-primary btn-sm" data-validate-playbook="${item.playbook_code}">Validasi</button><button class="btn btn-ghost btn-sm" data-defer-playbook="${item.playbook_code}">Tunda</button><button class="btn btn-danger btn-sm" data-reject-playbook="${item.playbook_code}">Tolak</button>`}</div>
+  </article>`;
+}
+
+function roadmapCardHtml(item) {
+  const workDone = ['Implemented','Verification Pending','Effective','Needs Adjustment','Reopened'].includes(item.status);
+  const effective = item.status === 'Effective';
+  return `<article class="card roadmap-card">
+    <div class="solution-top"><div><div class="eyebrow">${escapeHtml(item.phase || 'FOUNDATION')} · ${escapeHtml(item.target_window || '')}</div><h3>${escapeHtml(item.playbook_code)} — ${escapeHtml(item.title)}</h3></div>${priorityBadge(item.priority || 'P2')}</div>
+    <p class="reco-action">${escapeHtml(item.recommended_action || '')}</p>
+    <div class="roadmap-progress"><span class="milestone ${workDone ? 'done' : ''}">✓ Pekerjaan selesai</span><span class="milestone ${effective ? 'done' : ''}">✓ Efektivitas terverifikasi</span></div>
+    <div class="grid grid-3 roadmap-fields"><div><div class="helper">PIC</div><strong>${escapeHtml(item.owner || 'Belum ditetapkan')}</strong></div><div><div class="helper">Target</div><strong>${escapeHtml(item.due_date || item.target_window || '—')}</strong></div><div class="form-group" style="margin:0"><label>Status</label><select class="select" data-roadmap-status="${escapeHtml(item.id)}">${['Planned','In Progress','Implemented','Verification Pending','Effective','Needs Adjustment','Reopened'].map(value => `<option ${item.status === value ? 'selected' : ''}>${value}</option>`).join('')}</select></div></div>
+    <details class="disclosure"><summary>Kriteria dan deliverables</summary><div class="disclosure-body"><p><strong>Completion:</strong> ${escapeHtml(item.completion_criteria || '')}</p><p><strong>Effectiveness:</strong> ${escapeHtml(item.effectiveness_criteria || '')}</p>${item.deliverables?.length ? `<ul>${item.deliverables.map(deliverable => `<li>${escapeHtml(deliverable.name || deliverable)}${deliverable.status ? ` · ${escapeHtml(deliverable.status)}` : ''}</li>`).join('')}</ul><button class="btn btn-ghost btn-sm" data-manage-deliverables="${escapeHtml(item.id)}">Kelola output</button>` : ''}</div></details>
+  </article>`;
+}
+
+async function renderTransformationPlan(projectId, project, analytics) {
+  const slot = document.querySelector('#transformationSlot');
+  if (!slot) return;
+  try {
+    const context = await getTransformationContext(projectId, analytics);
+    const stored = (await safeGet(`projectTransformations/${projectId}`)) || context.stored;
+    const recommendations = context.recommendations.map(item => ({ ...item, ...(stored.recommendations?.[item.playbook_code] || {}) }));
+    const roadmapSource = Object.values(stored.roadmap || {});
+    const roadmap = buildRoadmap(roadmapSource).map(computed => {
+      const saved = roadmapSource.find(item => item.id === computed.id) || {};
+      return { ...computed, phase: saved.phase || computed.phase, target_window: saved.target_window || computed.target_window };
+    });
+    const counts = ['P0','P1','P2','P3'].map(priority => recommendations.filter(item => item.priority === priority).length);
+    const validated = recommendations.filter(item => item.validation_status === 'VALIDATED').length;
+    const active = roadmap.filter(item => item.status === 'In Progress').length;
+    const complete = roadmap.filter(item => ['Implemented','Verification Pending','Effective'].includes(item.status)).length;
+    const pending = roadmap.filter(item => item.status === 'Verification Pending').length;
+    const next = nextJourneyStep(project, { ...stored, findings: stored.findings || {} });
+    slot.innerHTML = `
+      <section class="journey-card card"><div><div class="eyebrow">Project Journey · Tahap ${next.step}/10</div><h3>${escapeHtml(next.label)}</h3><p class="small muted">Persiapan → Responden → Pengumpulan → Bukti → Diagnosis → Validasi → Transformation Plan → Implementasi → Effectiveness Review → Report</p></div><button class="btn btn-primary btn-sm" data-go-tab="${next.tab}">Langkah berikutnya →</button></section>
+      <div class="section-head transformation-head"><div><div class="eyebrow">Consulting Intelligence System</div><h2 style="margin-top:5px">Transformation Plan</h2><p class="lead small">Diagnosis menemukan pola. Playbook memberi jalan. Konsultan memvalidasi keputusan dan bukti efektivitas.</p></div><button class="btn btn-ghost" id="clientPreviewBtn">Tampilan klien</button></div>
+      <div class="metric-strip">${[['Finding',context.findings.length],['P0',counts[0]],['P1',counts[1]],['P2',counts[2]],['P3',counts[3]],['Validated',validated],['Aktif',active],['Selesai',complete],['Verifikasi',pending]].map(([label,value]) => `<div><strong>${value}</strong><span>${label}</span></div>`).join('')}</div>
+      <details class="card findings-panel"><summary>Temuan diagnosis (${context.findings.length})</summary><div class="finding-grid">${context.findings.map(item => `<div><span class="badge neutral">${escapeHtml(item.indicator_id)}</span><strong>Skor ${scoreText(item.score)}</strong><span>Gap ${item.perception_gap.toFixed(1)} · Confidence ${escapeHtml(item.confidence)}${item.evidence_gap ? ' · bukti terbatas' : ''}</span></div>`).join('')}</div></details>
+      <section style="margin-top:24px"><div class="section-head"><div><div class="eyebrow">Recommended Playbooks</div><h2 style="margin-top:5px">Prioritas berbasis akar masalah</h2></div></div>${recommendations.length ? `<div class="grid grid-2">${recommendations.map(recommendationCardHtml).join('')}</div>` : emptyHtml('Belum ada playbook yang direkomendasikan', 'Rekomendasi akan muncul setelah jawaban asesmen menghasilkan finding yang cukup.')}</section>
+      <section style="margin-top:30px"><div class="section-head"><div><div class="eyebrow">Delivery Roadmap</div><h2 style="margin-top:5px">Dari fondasi sampai efektivitas</h2></div></div>${roadmap.length ? `<div class="roadmap-list">${roadmap.map(roadmapCardHtml).join('')}</div>` : emptyHtml('Roadmap masih kosong', 'Validasi playbook yang relevan, lalu tambahkan ke roadmap untuk menyusun intervensi.')}</section>`;
+    bindTransformationPlan(projectId, project, analytics, context, recommendations, roadmap);
+  } catch (error) {
+    console.error(error);
+    slot.innerHTML = emptyHtml('Transformation Plan belum dapat dimuat', 'Periksa koneksi dan artefak knowledge base, lalu coba lagi.', '<button class="btn btn-primary" id="retryTransformation">Coba lagi</button>');
+    document.querySelector('#retryTransformation')?.addEventListener('click', () => renderTransformationPlan(projectId, project, analytics));
+  }
+}
+
+function bindTransformationPlan(projectId, project, analytics, context, recommendations, roadmap) {
+  document.querySelectorAll('[data-go-tab]').forEach(btn => btn.addEventListener('click', () => renderProject(projectId, btn.dataset.goTab)));
+  document.querySelectorAll('[data-open-playbook]').forEach(btn => btn.addEventListener('click', () => openPlaybookDetail(btn.dataset.openPlaybook, context.knowledgeBase, recommendations.find(item => item.playbook_code === btn.dataset.openPlaybook), context.findings)));
+  document.querySelectorAll('[data-validate-playbook]').forEach(btn => btn.addEventListener('click', () => {
+    const item = recommendations.find(row => row.playbook_code === btn.dataset.validatePlaybook);
+    const playbook = context.knowledgeBase.playbooks.find(row => row.id === item.playbook_id);
+    openValidationModal(projectId, project, analytics, item, playbook, context.knowledgeBase);
+  }));
+  for (const action of ['defer','reject']) document.querySelectorAll(`[data-${action}-playbook]`).forEach(btn => btn.addEventListener('click', async () => {
+    const code = btn.dataset[`${action}Playbook`];
+    const status = action === 'defer' ? 'DEFERRED' : 'REJECTED';
+    await update(ref(db, `projectTransformations/${projectId}/recommendations/${code}`), { validation_status: status, status, reviewedBy: state.user.uid, reviewedAt: now() });
+    showToast(`${code} ditandai ${status.toLowerCase()}.`);
+    renderTransformationPlan(projectId, project, analytics);
+  }));
+  document.querySelectorAll('[data-add-roadmap]').forEach(btn => btn.addEventListener('click', () => {
+    const item = recommendations.find(row => row.playbook_code === btn.dataset.addRoadmap);
+    const playbook = context.knowledgeBase.playbooks.find(row => row.id === item.playbook_id);
+    openRoadmapModal(projectId, project, analytics, item, playbook);
+  }));
+  document.querySelectorAll('[data-roadmap-status]').forEach(select => select.addEventListener('change', async () => {
+    const roadmapItem = roadmap.find(item => item.id === select.dataset.roadmapStatus);
+    if (select.value === 'Effective') {
+      select.value = roadmapItem.status;
+      return openEffectivenessModal(projectId, project, analytics, roadmapItem);
+    }
+    await update(ref(db, `projectTransformations/${projectId}/roadmap/${select.dataset.roadmapStatus}`), { status: select.value, updatedAt: now(), updatedBy: state.user.uid });
+    showToast('Status implementasi diperbarui.');
+    renderTransformationPlan(projectId, project, analytics);
+  }));
+  document.querySelectorAll('[data-manage-deliverables]').forEach(btn => btn.addEventListener('click', () => {
+    const item = roadmap.find(row => row.id === btn.dataset.manageDeliverables);
+    openDeliverablesModal(projectId, project, analytics, item);
+  }));
+  document.querySelector('#clientPreviewBtn')?.addEventListener('click', async () => openClientPreview(projectId, project));
+}
+
+function openDeliverablesModal(projectId, project, analytics, item) {
+  const deliverables = toArray(item.deliverables);
+  const modal = document.createElement('div');
+  modal.className = 'modal-backdrop';
+  modal.innerHTML = `<div class="modal playbook-modal" role="dialog" aria-modal="true" aria-labelledby="deliverablesTitle"><div class="modal-head"><div><div class="eyebrow">Playbook Outputs · ${escapeHtml(item.playbook_code)}</div><h2 id="deliverablesTitle" style="margin:5px 0 0">Deliverables intervensi</h2></div><button type="button" class="icon-btn" data-close aria-label="Tutup dialog">×</button></div><form id="deliverablesForm"><div class="modal-body"><div class="deliverable-editor">${deliverables.map((deliverable, index) => `<section class="deliverable-row" data-deliverable-row><input type="hidden" data-field="id" value="${escapeHtml(deliverable.id || `${item.id}-d${index + 1}`)}"><div class="form-group"><label>Deliverable</label><input class="input" data-field="name" value="${escapeHtml(deliverable.name || deliverable)}" required></div><div class="grid grid-3"><div class="form-group"><label>Owner</label><input class="input" data-field="owner" value="${escapeHtml(deliverable.owner || '')}" placeholder="PIC"></div><div class="form-group"><label>Status</label><select class="select" data-field="status">${['Planned','In Progress','Completed','Verified'].map(value => `<option ${deliverable.status === value ? 'selected' : ''}>${value}</option>`).join('')}</select></div><div class="form-group"><label>Completion date</label><input type="date" class="input" data-field="completion_date" value="${escapeHtml(deliverable.completion_date || '')}"></div></div><div class="form-group"><label>Evidence / output reference</label><input class="input" data-field="evidence" value="${escapeHtml(deliverable.evidence || '')}" placeholder="Tautan, nama dokumen, atau referensi bukti"></div><label class="check-line"><input type="checkbox" data-field="consultant_verification" ${deliverable.consultant_verification ? 'checked' : ''}> Diverifikasi konsultan</label></section>`).join('')}</div></div><div class="modal-foot"><button type="button" class="btn btn-ghost" data-close>Batal</button><button class="btn btn-primary" type="submit">Simpan output</button></div></form></div>`;
+  const closeModal = mountModal(modal, '[data-field="owner"]');
+  modal.querySelector('#deliverablesForm').addEventListener('submit', async event => {
+    event.preventDefault();
+    const values = [...modal.querySelectorAll('[data-deliverable-row]')].map(row => Object.fromEntries([...row.querySelectorAll('[data-field]')].map(field => [field.dataset.field, field.type === 'checkbox' ? field.checked : field.value.trim()])));
+    await update(ref(db, `projectTransformations/${projectId}/roadmap/${item.id}`), { deliverables: values, updatedAt: now(), updatedBy: state.user.uid });
+    closeModal();
+    showToast('Deliverables dan bukti diperbarui.');
+    renderTransformationPlan(projectId, project, analytics);
+  });
+}
+
+function openEffectivenessModal(projectId, project, analytics, item) {
+  const modal = document.createElement('div');
+  modal.className = 'modal-backdrop';
+  modal.innerHTML = `<div class="modal" role="dialog" aria-modal="true" aria-labelledby="effectivenessTitle"><div class="modal-head"><div><div class="eyebrow">Effectiveness Review · ${escapeHtml(item.playbook_code)}</div><h2 id="effectivenessTitle" style="margin:5px 0 0">Buktikan perubahan menghasilkan manfaat</h2></div><button type="button" class="icon-btn" data-close aria-label="Tutup dialog">×</button></div><form id="effectivenessForm"><div class="modal-body"><p class="lead small">Pekerjaan selesai belum berarti intervensi efektif. Catat bukti hasil setelah periode observasi yang relevan.</p><div class="form-group"><label for="effectivenessEvidence">Bukti efektivitas</label><textarea class="textarea" id="effectivenessEvidence" required placeholder="Contoh: jumlah eskalasi salah turun dari 14 menjadi 4 dalam 60 hari…"></textarea></div><div class="form-group"><label for="effectivenessDate">Tanggal verifikasi</label><input class="input" type="date" id="effectivenessDate" required value="${new Date().toISOString().slice(0,10)}"></div><div class="form-group"><label for="effectivenessDecision">Keputusan</label><select class="select" id="effectivenessDecision"><option value="Effective">Efektif</option><option value="Needs Adjustment">Perlu penyesuaian</option><option value="Reopened">Buka kembali</option></select></div><p class="helper">Kriteria: ${escapeHtml(item.effectiveness_criteria || '')}</p></div><div class="modal-foot"><button type="button" class="btn btn-ghost" data-close>Batal</button><button class="btn btn-primary" type="submit">Simpan verifikasi</button></div></form></div>`;
+  const closeModal = mountModal(modal, '#effectivenessEvidence');
+  modal.querySelector('#effectivenessForm').addEventListener('submit', async event => {
+    event.preventDefault();
+    const decision = modal.querySelector('#effectivenessDecision').value;
+    const evidence = modal.querySelector('#effectivenessEvidence').value.trim();
+    const verifiedAt = new Date(`${modal.querySelector('#effectivenessDate').value}T00:00:00`).getTime();
+    const updates = {};
+    updates[`projectTransformations/${projectId}/roadmap/${item.id}/status`] = decision;
+    updates[`projectTransformations/${projectId}/roadmap/${item.id}/effectivenessEvidence`] = evidence;
+    updates[`projectTransformations/${projectId}/roadmap/${item.id}/effectivenessVerifiedAt`] = verifiedAt;
+    updates[`projectTransformations/${projectId}/roadmap/${item.id}/effectivenessVerifiedBy`] = state.user.uid;
+    updates[`auditLogs/${projectId}/${Date.now()}`] = { action: 'EFFECTIVENESS_REVIEW', playbookCode: item.playbook_code, decision, evidence, actor: state.user.uid, at: now() };
+    await update(ref(db), updates);
+    closeModal();
+    showToast(decision === 'Effective' ? 'Efektivitas berhasil diverifikasi.' : 'Hasil review efektivitas disimpan.');
+    renderTransformationPlan(projectId, project, analytics);
+  });
+}
+
+function openValidationModal(projectId, project, analytics, recommendation, playbook, knowledgeBase) {
+  const modal = document.createElement('div');
+  modal.className = 'modal-backdrop';
+  modal.innerHTML = `<div class="modal" role="dialog" aria-modal="true" aria-labelledby="validationTitle"><div class="modal-head"><div><div class="eyebrow">Consultant Review · ${escapeHtml(recommendation.playbook_code)}</div><h2 id="validationTitle" style="margin:5px 0 0">Validasi rekomendasi</h2></div><button type="button" class="icon-btn" data-close aria-label="Tutup dialog">×</button></div><form id="validationForm"><div class="modal-body">
+    <div class="grid grid-2"><div class="form-group"><label for="validationPriority">Prioritas</label><select class="select" id="validationPriority">${['P0','P1','P2','P3'].map(value => `<option ${recommendation.priority === value ? 'selected' : ''}>${value}</option>`).join('')}</select></div><div class="form-group"><label for="replacementPlaybook">Playbook pengganti <span class="muted" style="font-weight:500">(opsional)</span></label><select class="select" id="replacementPlaybook"><option value="">Tetap ${escapeHtml(playbook.code)}</option>${knowledgeBase.playbooks.filter(item => item.code !== playbook.code).map(item => `<option value="${item.code}">${item.code} · ${escapeHtml(item.title)}</option>`).join('')}</select></div></div>
+    <div class="form-group"><label for="validationReason">Alasan konsultan</label><textarea class="textarea" id="validationReason" required>${escapeHtml(recommendation.reason)}</textarea></div>
+    <div class="form-group"><label for="validationDependencies">Dependency <span class="muted" style="font-weight:500">(pisahkan dengan koma)</span></label><input class="input" id="validationDependencies" value="${escapeHtml((recommendation.dependencies || []).join(', '))}"></div>
+    <div class="form-group"><label for="combinedPlaybooks">Gabungkan dengan playbook lain <span class="muted" style="font-weight:500">(opsional)</span></label><input class="input" id="combinedPlaybooks" placeholder="Contoh: HR-03, QLT-03"></div>
+    <p class="helper">Validasi menyimpan snapshot versi playbook. Perubahan knowledge base berikutnya tidak akan mengubah keputusan project ini secara diam-diam.</p>
+  </div><div class="modal-foot"><button type="button" class="btn btn-ghost" data-close>Batal</button><button type="submit" class="btn btn-primary">Validasi rekomendasi</button></div></form></div>`;
+  const closeModal = mountModal(modal, '#validationPriority');
+  modal.querySelector('#validationForm').addEventListener('submit', async event => {
+    event.preventDefault();
+    const replacementCode = modal.querySelector('#replacementPlaybook').value;
+    const selectedPlaybook = replacementCode ? knowledgeBase.playbooks.find(item => item.code === replacementCode) : playbook;
+    const reason = modal.querySelector('#validationReason').value.trim();
+    const dependencies = modal.querySelector('#validationDependencies').value.split(',').map(item => item.trim()).filter(Boolean);
+    const combined = modal.querySelector('#combinedPlaybooks').value.split(',').map(item => item.trim()).filter(Boolean);
+    const seed = { ...recommendation, playbook_id: selectedPlaybook.id, playbook_code: selectedPlaybook.code, playbook_version: selectedPlaybook.version, title: selectedPlaybook.title, priority: modal.querySelector('#validationPriority').value, reason, dependencies, missing_dependencies: dependencies, combined_playbooks: combined };
+    const validated = snapshotValidatedRecommendation(seed, selectedPlaybook, state.user.uid);
+    validated.audit[0].reason = reason;
+    validated.audit[0].replaced = replacementCode ? recommendation.playbook_code : null;
+    const updates = {};
+    updates[`projectTransformations/${projectId}/recommendations/${selectedPlaybook.code}`] = validated;
+    if (replacementCode) updates[`projectTransformations/${projectId}/recommendations/${recommendation.playbook_code}`] = { ...recommendation, status: 'REJECTED', validation_status: 'REJECTED', replacedBy: replacementCode, reviewedBy: state.user.uid, reviewedAt: now(), consultantReason: reason };
+    updates[`auditLogs/${projectId}/${Date.now()}`] = { action: replacementCode ? 'REPLACED_RECOMMENDATION' : 'VALIDATED_RECOMMENDATION', playbookCode: selectedPlaybook.code, previousPlaybookCode: replacementCode ? recommendation.playbook_code : null, priority: validated.priority, reason, dependencies, combinedPlaybooks: combined, actor: state.user.uid, at: now() };
+    await update(ref(db), updates);
+    closeModal();
+    showToast(`${selectedPlaybook.code} divalidasi dan versinya dikunci.`);
+    renderTransformationPlan(projectId, project, analytics);
+  });
+}
+
+function openPlaybookDetail(code, knowledgeBase, recommendation, findings = []) {
+  const playbook = knowledgeBase.playbooks.find(item => item.code === code);
+  if (!playbook) return;
+  const modal = document.createElement('div');
+  modal.className = 'modal-backdrop';
+  modal.innerHTML = `<div class="modal playbook-modal" role="dialog" aria-modal="true" aria-labelledby="playbookTitle"><div class="modal-head"><div><div class="eyebrow">Transformation Playbook · ${escapeHtml(playbook.code)} · v${escapeHtml(playbook.version)}</div><h2 id="playbookTitle" style="margin:5px 0 0">${escapeHtml(playbook.title)}</h2></div><button type="button" class="icon-btn" data-close aria-label="Tutup dialog">×</button></div><div class="modal-body">
+    ${recommendation ? `<section class="detail-section highlight"><h3>Mengapa direkomendasikan</h3><p>${escapeHtml(recommendation.reason)}</p><div class="solution-signals">${priorityBadge(recommendation.priority)}<span class="badge neutral">Confidence ${escapeHtml(recommendation.confidence)}</span>${recommendation.evidence_warning ? '<span class="badge warn">Bukti rendah</span>' : ''}</div><p class="helper">Indikator pemicu: ${recommendation.trigger_indicators.map(escapeHtml).join(', ') || 'Prasyarat lintas domain'}</p></section>` : ''}
+    <section class="detail-section"><h3>Kondisi ideal</h3><p>${escapeHtml(playbook.ideal_condition)}</p></section>
+    ${recommendation ? `<section class="detail-section"><h3>Kondisi saat ini</h3>${findings.filter(item => recommendation.finding_ids.includes(item.id)).length ? `<ul>${findings.filter(item => recommendation.finding_ids.includes(item.id)).map(item => `<li>${escapeHtml(item.indicator_id)} · skor ${scoreText(item.score)} · gap ${item.perception_gap.toFixed(1)} · confidence ${escapeHtml(item.confidence)}</li>`).join('')}</ul>` : '<p>Playbook ini muncul sebagai prasyarat lintas domain. Kondisi perlu dikonfirmasi konsultan sebelum implementasi.</p>'}</section>` : ''}
+    <section class="detail-section"><h3>Tahapan intervensi</h3><ol class="step-list">${playbook.intervention_steps.map(step => `<li><strong>${escapeHtml(step.step || step.stage)}</strong><span>${escapeHtml(step.activity)}</span><small>Output: ${escapeHtml(step.output || '—')}</small></li>`).join('')}</ol></section>
+    <section class="detail-section"><h3>Toolkit</h3><div class="toolkit-mini-grid">${playbook.toolkits.map(toolkit => `<div><strong>${escapeHtml(toolkit.code)} · ${escapeHtml(toolkit.name)}</strong><span>${escapeHtml(toolkit.purpose)}</span></div>`).join('')}</div></section>
+    <div class="grid grid-2"><section class="detail-section"><h3>Kompetensi konsultan</h3><ul>${playbook.consultant_competencies.map(item => `<li><strong>${escapeHtml(item.competency)}</strong> — ${escapeHtml(item.class)}</li>`).join('')}</ul></section><section class="detail-section"><h3>Batas kompetensi</h3><ul>${playbook.specialist_boundaries.map(item => `<li>${escapeHtml(item)}</li>`).join('')}</ul></section></div>
+    <section class="detail-section criteria"><h3>Completion Criteria</h3><p>${escapeHtml(playbook.completion_criteria)}</p><h3>Effectiveness Criteria</h3><p>${escapeHtml(playbook.effectiveness_criteria)}</p></section>
+    <section class="detail-section"><h3>Dependency</h3><p>${escapeHtml(playbook.dependency_note || 'Tidak ada dependency khusus.')}</p></section>
+  </div></div>`;
+  mountModal(modal, '[data-close]');
+}
+
+function openRoadmapModal(projectId, project, analytics, recommendation, playbook) {
+  const modal = document.createElement('div');
+  modal.className = 'modal-backdrop';
+  const roadmap = buildRoadmap([{ ...recommendation, dependencies: recommendation.dependencies }])[0];
+  modal.innerHTML = `<div class="modal" role="dialog" aria-modal="true" aria-labelledby="roadmapTitle"><div class="modal-head"><div><div class="eyebrow">Add to Roadmap · ${escapeHtml(playbook.code)}</div><h2 id="roadmapTitle" style="margin:5px 0 0">Susun draft intervensi</h2></div><button type="button" class="icon-btn" data-close aria-label="Tutup dialog">×</button></div><form id="roadmapForm"><div class="modal-body">
+    <div class="grid grid-2"><div class="form-group"><label for="roadPriority">Prioritas</label><select class="select" id="roadPriority">${['P0','P1','P2','P3'].map(value => `<option ${recommendation.priority === value ? 'selected' : ''}>${value}</option>`).join('')}</select></div><div class="form-group"><label for="roadPhase">Fase</label><select class="select" id="roadPhase">${['RESPONSE NOW','FOUNDATION','IMPLEMENT','CONTROL','IMPROVE'].map(value => `<option ${roadmap.phase === value ? 'selected' : ''}>${value}</option>`).join('')}</select></div></div>
+    <div class="form-group"><label for="roadAction">Recommended action</label><textarea class="textarea" id="roadAction" required>${escapeHtml(playbook.purpose)}</textarea></div>
+    <div class="grid grid-2"><div class="form-group"><label for="roadOwner">PIC function</label><input class="input" id="roadOwner" placeholder="Contoh: Kepala unit"></div><div class="form-group"><label for="roadDue">Target time</label><input class="input" id="roadDue" placeholder="Contoh: 31–60 hari" value="${escapeHtml(roadmap.target_window)}"></div></div>
+    <div class="form-group"><label for="roadCompletion">Completion criteria</label><textarea class="textarea" id="roadCompletion">${escapeHtml(playbook.completion_criteria)}</textarea></div><div class="form-group"><label for="roadEffectiveness">Effectiveness check</label><textarea class="textarea" id="roadEffectiveness">${escapeHtml(playbook.effectiveness_criteria)}</textarea></div>
+    <p class="helper">Dependency: ${escapeHtml(playbook.dependencies.join(', ') || 'Tidak ada')} · Project menyimpan snapshot playbook v${escapeHtml(playbook.version)}.</p>
+  </div><div class="modal-foot"><button type="button" class="btn btn-ghost" data-close>Batal</button><button class="btn btn-primary" type="submit">Simpan ke roadmap</button></div></form></div>`;
+  const closeModal = mountModal(modal, '#roadPriority');
+  modal.querySelector('#roadmapForm').addEventListener('submit', async event => {
+    event.preventDefault();
+    const id = `${playbook.code}-${Date.now()}`;
+    const item = {
+      id, project_id: projectId, playbook_id: playbook.id, playbook_code: playbook.code, playbook_version: playbook.version, title: playbook.title,
+      finding_ids: recommendation.finding_ids, priority: modal.querySelector('#roadPriority').value, phase: modal.querySelector('#roadPhase').value,
+      recommended_action: modal.querySelector('#roadAction').value.trim(), owner: modal.querySelector('#roadOwner').value.trim(), due_date: modal.querySelector('#roadDue').value.trim(), target_window: modal.querySelector('#roadDue').value.trim(),
+      completion_criteria: modal.querySelector('#roadCompletion').value.trim(), effectiveness_criteria: modal.querySelector('#roadEffectiveness').value.trim(), dependencies: recommendation.dependencies || playbook.dependencies,
+      status: 'Planned', validation_status: 'VALIDATED', createdBy: state.user.uid, createdAt: now(), playbook_snapshot: playbook,
+      deliverables: playbook.deliverables.map((name, index) => ({ id: `${id}-d${index + 1}`, name, owner: '', status: 'Planned', evidence: '', completion_date: '', consultant_verification: false }))
+    };
+    await set(ref(db, `projectTransformations/${projectId}/roadmap/${id}`), item);
+    closeModal();
+    showToast(`${playbook.code} ditambahkan ke roadmap.`);
+    renderTransformationPlan(projectId, project, analytics);
+  });
+}
+
+async function openClientPreview(projectId, project) {
+  const stored = await safeGet(`projectTransformations/${projectId}`);
+  const view = clientProjection(stored || {});
+  const modal = document.createElement('div');
+  modal.className = 'modal-backdrop';
+  modal.innerHTML = `<div class="modal" role="dialog" aria-modal="true" aria-labelledby="clientViewTitle"><div class="modal-head"><div><div class="eyebrow">Tampilan klien · hanya hasil tervalidasi</div><h2 id="clientViewTitle" style="margin:5px 0 0">Prioritas Transformasi</h2></div><button type="button" class="icon-btn" data-close aria-label="Tutup dialog">×</button></div><div class="modal-body"><p class="lead">${escapeHtml(project.pesantren)}</p>${view.priorities.length ? view.priorities.map((item, index) => `<article class="client-priority"><div class="eyebrow">Prioritas ${index + 1}</div><h3>${escapeHtml(item.title)}</h3><p><strong>Mengapa:</strong> ${escapeHtml(item.reason)}</p><p><strong>Target awal:</strong> ${escapeHtml(item.target_window || 'Disepakati bersama')}</p><span class="badge neutral">${escapeHtml(item.status || 'Belum dimulai')}</span></article>`).join('') : emptyHtml('Belum ada prioritas tervalidasi', 'Klien hanya melihat playbook yang sudah divalidasi konsultan.')}</div>${view.priorities.length ? '<div class="modal-foot"><button class="btn btn-primary" id="publishClientView">Publikasikan tampilan klien</button></div>' : ''}</div>`;
+  mountModal(modal, '[data-close]');
+  document.querySelector('#publishClientView')?.addEventListener('click', async event => {
+    const button = event.currentTarget;
+    setButtonLoading(button, true, 'Memublikasikan…');
+    try {
+      await set(ref(db, `clientViews/${projectId}`), JSON.parse(JSON.stringify({ ...view, project: { name: project.name, pesantren: project.pesantren, period: project.period || '' }, publishedAt: now(), publishedBy: state.user.uid })));
+      showToast('Prioritas tervalidasi dipublikasikan ke tampilan klien.');
+    } catch (error) { console.error(error); showToast('Tampilan klien belum berhasil dipublikasikan.', 'error'); }
+    finally { setButtonLoading(button, false); }
+  });
+}
+
+async function renderKnowledgeBaseAdmin() {
+  destroyCharts();
+  const kb = await loadKnowledgeBase();
+  appEl.innerHTML = consultantShell(`<main class="page"><div class="container"><button class="breadcrumb" id="backDashboard" style="border:0;background:none;padding:0">← Kembali ke dashboard</button><div class="page-head"><div><div class="eyebrow">Internal · Knowledge Base v${escapeHtml(kb.knowledge_base_version)}</div><h1>Transformation Playbooks</h1><p class="lead">${kb.playbooks.length} playbook, ${kb.toolkits.length} toolkit, dan ${kb.indicator_map.length} mapping indikator. Seed aktif dibaca dari artefak tervalidasi.</p></div><button class="btn btn-primary" id="publishKbBtn">Publikasikan v${escapeHtml(kb.knowledge_base_version)} ke database</button></div><div class="filter-bar"><select class="select" id="kbDomainFilter"><option value="">Semua domain</option>${kb.domains.map(domain => `<option value="${domain.code}">${domain.code} · ${escapeHtml(domain.name)}</option>`).join('')}</select><input class="input" id="kbSearch" placeholder="Cari kode atau judul playbook…"></div><div class="grid grid-3" id="kbGrid">${kb.playbooks.map(kbCardHtml).join('')}</div></div></main>`);
+  bindShell();
+  document.querySelector('#backDashboard').addEventListener('click', renderDashboard);
+  const filter = () => {
+    const domain = document.querySelector('#kbDomainFilter').value;
+    const query = document.querySelector('#kbSearch').value.toLowerCase();
+    document.querySelectorAll('[data-kb-card]').forEach(card => card.classList.toggle('hidden', Boolean(domain && card.dataset.domain !== domain || query && !card.textContent.toLowerCase().includes(query))));
+  };
+  document.querySelector('#kbDomainFilter').addEventListener('change', filter);
+  document.querySelector('#kbSearch').addEventListener('input', filter);
+  document.querySelectorAll('[data-open-kb]').forEach(btn => btn.addEventListener('click', () => openPlaybookDetail(btn.dataset.openKb, kb)));
+  document.querySelector('#publishKbBtn').addEventListener('click', async event => {
+    const button = event.currentTarget;
+    setButtonLoading(button, true, 'Memublikasikan…');
+    try {
+      await set(ref(db, `knowledgeBase/versions/${kb.knowledge_base_version.replaceAll('.', '_')}`), { schema_version: kb.schema_version, knowledge_base_version: kb.knowledge_base_version, source: kb.source, domains: kb.domains, playbooks: Object.fromEntries(kb.playbooks.map(item => [item.code, item])), toolkits: Object.fromEntries(kb.toolkits.map(item => [item.code, item])), indicator_map: kb.indicator_map, importedAt: now(), importedBy: state.user.uid, active: true });
+      await set(ref(db, `knowledgeBaseImports/${Date.now()}`), { version: kb.knowledge_base_version, counts: { domains: kb.domains.length, playbooks: kb.playbooks.length, toolkits: kb.toolkits.length, indicatorLinks: kb.indicator_map.length }, status: 'SUCCESS', importedBy: state.user.uid, importedAt: now() });
+      showToast('Knowledge base berhasil dipublikasikan ke database.');
+    } catch (error) { console.error(error); showToast('Knowledge base belum berhasil dipublikasikan.', 'error'); }
+    finally { setButtonLoading(button, false); }
+  });
+}
+
+function kbCardHtml(playbook) {
+  return `<article class="card kb-card" data-kb-card data-domain="${playbook.domain_code}"><div class="solution-top"><span class="badge">${playbook.code}</span><span class="small muted">v${escapeHtml(playbook.version)}</span></div><h3>${escapeHtml(playbook.title)}</h3><p class="small muted">${escapeHtml(playbook.description)}</p><div class="project-meta"><span>${playbook.linked_indicators.length} indikator</span><span>${playbook.toolkits.length} toolkit</span><span>${playbook.active ? 'Aktif' : 'Nonaktif'}</span></div><button class="btn btn-ghost btn-sm" data-open-kb="${playbook.code}">Lihat detail</button></article>`;
+}
+
+async function renderToolkitLibrary() {
+  destroyCharts();
+  const kb = await loadKnowledgeBase();
+  appEl.innerHTML = consultantShell(`<main class="page"><div class="container"><button class="breadcrumb" id="backDashboard" style="border:0;background:none;padding:0">← Kembali ke dashboard</button><div class="page-head"><div><div class="eyebrow">Transformation resources</div><h1>Toolkit Library</h1><p class="lead">${kb.toolkits.length} alat kerja untuk membantu konsultan mengubah rekomendasi menjadi output yang dapat diperiksa.</p></div></div><div class="filter-bar"><select class="select" id="toolkitDomainFilter"><option value="">Semua domain</option>${kb.domains.map(domain => `<option value="${domain.code}">${domain.code} · ${escapeHtml(domain.name)}</option>`).join('')}</select><select class="select" id="toolkitPlaybookFilter"><option value="">Semua playbook</option>${kb.playbooks.map(item => `<option value="${item.code}">${item.code}</option>`).join('')}</select><input class="input" id="toolkitSearch" placeholder="Cari toolkit…"></div><div class="toolkit-library" id="toolkitGrid">${kb.toolkits.map(item => `<article class="card toolkit-card" data-toolkit-card data-domain="${kb.playbooks.find(p => p.code === item.playbook_code)?.domain_code}" data-playbook="${item.playbook_code}"><div><span class="badge neutral">${item.playbook_code}</span><h3>${escapeHtml(item.name)}</h3><p class="small muted">${escapeHtml(item.purpose)}</p></div><div class="small"><strong>Output:</strong> ${escapeHtml(item.expected_output)}</div></article>`).join('')}</div></div></main>`);
+  bindShell();
+  document.querySelector('#backDashboard').addEventListener('click', renderDashboard);
+  const filter = () => {
+    const domain = document.querySelector('#toolkitDomainFilter').value;
+    const playbook = document.querySelector('#toolkitPlaybookFilter').value;
+    const query = document.querySelector('#toolkitSearch').value.toLowerCase();
+    document.querySelectorAll('[data-toolkit-card]').forEach(card => card.classList.toggle('hidden', Boolean(domain && card.dataset.domain !== domain || playbook && card.dataset.playbook !== playbook || query && !card.textContent.toLowerCase().includes(query))));
+  };
+  ['#toolkitDomainFilter','#toolkitPlaybookFilter'].forEach(selector => document.querySelector(selector).addEventListener('change', filter));
+  document.querySelector('#toolkitSearch').addEventListener('input', filter);
 }
 
 /* ---------------- Respondent ---------------- */
@@ -820,7 +1168,7 @@ async function renderProject(projectId, tab = state.currentTab || 'overview') {
         <div><div class="eyebrow">${escapeHtml(project.name || 'Asesmen')}</div><h1 class="project-title">${escapeHtml(project.pesantren)}</h1><div class="project-meta"><span>${domains.length} bidang</span><span>${Object.keys(project.perspectives || {}).length} perspektif</span><span>${escapeHtml(project.period || 'Tanpa periode')}</span></div></div>
         <div><span class="badge ${analytics.submittedCount ? 'success' : 'neutral'}">${analytics.submittedCount} jawaban masuk</span></div>
       </div>
-      <div class="tabs">${tabButton('overview','Gambaran Awal',tab)}${tabButton('perspectives','Perspektif',tab)}${tabButton('compare','Bandingkan',tab)}${tabButton('recommendations','Rekomendasi',tab)}${tabButton('followup','Tindak Lanjut',tab)}</div>
+      <div class="tabs">${tabButton('overview','Gambaran Awal',tab)}${tabButton('perspectives','Perspektif',tab)}${tabButton('compare','Bandingkan',tab)}${tabButton('recommendations','Rekomendasi Awal',tab)}${tabButton('transformation','Transformation Plan',tab)}${tabButton('followup','Tindak Lanjut Lama',tab)}</div>
       <div id="projectContent">${renderProjectTab(projectId, project, bundle, analytics, tab)}</div>
     </div></main>`);
   bindShell();

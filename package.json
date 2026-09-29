@@ -1,0 +1,10 @@
+{
+  "name": "mz-consulting-audit",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "kb:dry-run": "node scripts/import-knowledge-base.mjs --dry-run",
+    "kb:build": "node scripts/import-knowledge-base.mjs --write",
+    "test": "node --test"
+  }
+}

@@ -1,0 +1,26 @@
+{
+  "valid": true,
+  "errors": [],
+  "warnings": [
+    "Seed berisi 298 toolkit (target deskriptif sekitar 300)."
+  ],
+  "counts": {
+    "domains": 10,
+    "playbooks": 50,
+    "toolkits": 298,
+    "indicator_links": 100
+  },
+  "sourceFiles": [
+    "MZ_Transformation_Playbook_D01_Seed_V01.json",
+    "MZ_Transformation_Playbook_D02_Seed_V01.json",
+    "MZ_Transformation_Playbook_D03_Seed_V01.json",
+    "MZ_Transformation_Playbook_D04_Seed_V01.json",
+    "MZ_Transformation_Playbook_D05_Seed_V01.json",
+    "MZ_Transformation_Playbook_D06_Seed_V01.json",
+    "MZ_Transformation_Playbook_D07_Seed_V01.json",
+    "MZ_Transformation_Playbook_D08_Seed_V01.json",
+    "MZ_Transformation_Playbook_D09_Seed_V01.json",
+    "MZ_Transformation_Playbook_D10_Seed_V01.json"
+  ],
+  "generatedAt": "2026-09-29T00:26:28.823Z"
+}

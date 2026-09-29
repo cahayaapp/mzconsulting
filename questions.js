@@ -177,6 +177,24 @@ export const DOMAINS = [
       { id: 'digital_09', text: 'Apakah aplikasi atau alat digital dipilih karena memang membantu proses kerja?', action: 'Mulai dari masalah proses, lalu pilih alat yang paling sederhana untuk menyelesaikannya.' },
       { id: 'digital_10', text: 'Apakah data yang dikumpulkan benar-benar dipakai untuk mengambil keputusan?', action: 'Tentukan 3–5 data utama yang rutin dibaca dalam rapat atau review manajemen.' }
     ]
+  },
+  {
+    id: 'quality',
+    code: 'J',
+    title: 'Budaya Organisasi & Perbaikan Mutu',
+    subtitle: 'Apakah nilai lembaga hidup dalam perilaku dan mendorong perbaikan yang nyata?',
+    questions: [
+      { id: 'quality_01', text: 'Apakah nilai utama pesantren diterjemahkan menjadi perilaku yang jelas dalam pekerjaan sehari-hari?', action: 'Terjemahkan nilai menjadi contoh perilaku yang dapat dilihat, dipraktikkan, dan dikoreksi.' },
+      { id: 'quality_02', text: 'Apakah pimpinan dan penanggung jawab memberi teladan serta koreksi yang konsisten?', action: 'Sepakati standar keteladanan dan cara memberi koreksi yang konsisten lintas unit.' },
+      { id: 'quality_03', text: 'Apakah staf merasa aman menyampaikan masalah, kesalahan, atau risiko tanpa takut dipersalahkan?', action: 'Bangun jalur speak-up yang aman, jelas, dan memiliki perlindungan serta tindak lanjut.' },
+      { id: 'quality_04', text: 'Apakah masukan dan laporan ditanggapi secara adil serta dapat ditelusuri penyelesaiannya?', action: 'Catat penerimaan, penelaahan, keputusan, dan penutupan setiap masukan penting.' },
+      { id: 'quality_05', text: 'Apakah pimpinan rutin meninjau mutu layanan dan keputusan menggunakan bukti lintas unit?', action: 'Buat management review berkala dengan data minimum, keputusan, PIC, dan tenggat.' },
+      { id: 'quality_06', text: 'Apakah informasi dari unit lain diverifikasi sebelum menjadi dasar keputusan penting?', action: 'Tetapkan cara verifikasi silang untuk data dan temuan yang berdampak besar.' },
+      { id: 'quality_07', text: 'Apakah akar masalah dicari sebelum tindakan perbaikan ditetapkan?', action: 'Gunakan analisis akar masalah sederhana sebelum memilih tindakan korektif.' },
+      { id: 'quality_08', text: 'Apakah tindakan perbaikan diperiksa kembali untuk memastikan masalah benar-benar tidak berulang?', action: 'Pisahkan status selesai dikerjakan dari verifikasi efektivitas setelah periode yang relevan.' },
+      { id: 'quality_09', text: 'Apakah pelajaran dari masalah dan perbaikan dibagikan serta dimasukkan ke standar kerja?', action: 'Dokumentasikan pelajaran penting dan perbarui standar, briefing, atau pelatihan terkait.' },
+      { id: 'quality_10', text: 'Apakah pesantren memiliki kebiasaan mencoba, mengevaluasi, dan memperbaiki sistem secara bertahap?', action: 'Bangun siklus perbaikan kecil dengan tujuan, ukuran, review, dan keputusan tindak lanjut.' }
+    ]
   }
 ];
 

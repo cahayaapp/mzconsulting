@@ -2,6 +2,18 @@
 
 Versi sederhana untuk asesmen multiperspektif berbasis GitHub Pages + Firebase Realtime Database.
 
+Kini mencakup Transformation Knowledge Base D01–D10, solution engine deterministik, consultant validation, roadmap intervensi, toolkit library, client-safe projection, dan effectiveness review. Dokumentasi teknis tersedia di [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) dan [docs/MIGRATION.md](docs/MIGRATION.md).
+
+## Development checks
+
+```bash
+npm test
+npm run kb:dry-run
+npm run kb:build
+```
+
+Seed import menghasilkan `data/knowledge-base.v1.json` dan `data/import-report.v1.json`. Import bersifat atomik: artefak tidak ditulis jika ditemukan error penting.
+
 ## Konsep
 
 1. Konsultan membuat asesmen dan memilih bidang.
