@@ -297,6 +297,32 @@ label { font-size: 13px; font-weight: 800; color: #32534a; }
 .queue-summary span { color: var(--muted); font-size: 10px; text-transform: uppercase; font-weight: 800; }
 .intervention-filter { display: grid; grid-template-columns: repeat(2,minmax(180px,280px)); gap: 10px; margin: 18px 0; }
 .intervention-queue { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 14px; }
+.intervention-package-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 16px; }
+.intervention-package-card { padding: 21px; display: flex; flex-direction: column; }
+.intervention-package-card.safety { border-color: #dcaeae; box-shadow: inset 4px 0 #a33e3e; }
+.package-card-head { display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; }
+.package-card-head h3 { margin: 8px 0 0; }
+.package-playbook { display: grid; gap: 3px; padding: 12px 13px; margin-top: 14px; border-radius: 12px; background: var(--primary-soft); }
+.package-playbook small { color: var(--muted); font-size: 9px; text-transform: uppercase; font-weight: 800; }
+.package-playbook strong { color: var(--primary); font-size: 13px; }
+.package-playbook span { color: var(--muted); font-size: 10px; }
+.package-step-preview { display: grid; gap: 9px; padding-left: 24px; margin: 16px 0; }
+.package-step-preview li { padding-left: 3px; }
+.package-step-preview strong, .package-step-preview span { display: block; }
+.package-step-preview strong { font-size: 12px; }
+.package-step-preview span { color: var(--muted); font-size: 11px; line-height: 1.4; margin-top: 2px; }
+.intervention-package-card > .btn { margin-top: auto; align-self: flex-start; }
+.package-modal-subtitle { margin: 5px 0 0; color: var(--muted); font-size: 13px; }
+.package-step-list { display: grid; gap: 15px; list-style: none; padding: 0; }
+.package-step-list li { display: grid; grid-template-columns: 32px 1fr; gap: 12px; align-items: start; }
+.package-step-number { width: 30px; height: 30px; border-radius: 10px; display: grid; place-items: center; background: var(--primary); color: white; font-size: 12px; font-weight: 900; }
+.package-step-list p { margin: 4px 0; color: var(--muted); line-height: 1.55; }
+.package-step-list small { color: #507166; }
+.package-support-actions, .package-tool-grid { display: grid; gap: 9px; }
+.package-action-row, .package-tool-grid article { display: flex; justify-content: space-between; align-items: center; gap: 15px; padding: 13px; border: 1px solid var(--line); border-radius: 13px; background: #fbfcfb; }
+.package-action-row > div, .package-tool-grid article > div { display: grid; gap: 4px; }
+.package-action-row small, .package-tool-grid small { color: var(--muted); line-height: 1.4; }
+.package-tool-grid em { color: #527066; font-size: 10px; font-style: normal; }
 .intervention-card { padding: 19px; display: flex; flex-direction: column; align-items: flex-start; }
 .intervention-card.safety { border-color: #dcaeae; box-shadow: inset 4px 0 #a33e3e; }
 .intervention-card-top { width: 100%; display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
@@ -483,7 +509,7 @@ label { font-size: 13px; font-weight: 800; color: #32534a; }
   .followup-row > :first-child { grid-column: 1 / -1; }
   .metric-strip { grid-template-columns: repeat(9, 96px); }
   .toolkit-library { grid-template-columns: repeat(2,minmax(0,1fr)); }
-  .maturity-domain-grid, .intervention-queue { grid-template-columns: 1fr; }
+  .maturity-domain-grid, .intervention-queue, .intervention-package-grid { grid-template-columns: 1fr; }
   .overview-notes { grid-template-columns: 1fr; }
 }
 
@@ -550,6 +576,8 @@ label { font-size: 13px; font-weight: 800; color: #32534a; }
   .average-position-marker { display: none; }
   .intervention-filter { grid-template-columns: 1fr; }
   .intervention-meta { grid-template-columns: 1fr; }
+  .package-action-row, .package-tool-grid article { align-items: stretch; flex-direction: column; }
+  .package-action-row .btn, .package-tool-grid .btn { width: 100%; }
   .tool-detail dl { grid-template-columns: 1fr; gap: 4px; }
   .toast { left: 12px; right: 12px; bottom: calc(12px + env(safe-area-inset-bottom)); max-width: none; }
 }
