@@ -43,13 +43,12 @@ test('system suggestion remains distinct from consultant validation', () => {
   assert.notStrictEqual(validated, suggested);
 });
 
-test('client projection only exposes validated recommendations', () => {
-  const view = clientProjection({ recommendations: {
-    a: { playbook_code: 'ORG-02', title: 'A', priority: 'P1', reason: 'R', validation_status: 'VALIDATED' },
-    b: { playbook_code: 'HR-04', title: 'B', priority: 'P2', reason: 'R', validation_status: 'SYSTEM_SUGGESTED', internal_score: 99 }
+test('client projection uses selected domain plans instead of internal recommendations', () => {
+  const view = clientProjection({ recommendations: { secret: { internal_score: 99 } }, domainPlans: {
+    D02: { domainCode: 'D02', domainName: 'Tata Kelola', currentMaturity: 2, targetMaturity: 3, implementationRequirements: [], status: 'Belum Dimulai' }
   } });
-  assert.deepEqual(view.priorities.map(item => item.playbook_code), ['ORG-02']);
-  assert.equal('internal_score' in view.priorities[0], false);
+  assert.deepEqual(view.domainPlans.map(item => item.domainCode), ['D02']);
+  assert.equal('recommendations' in view, false);
 });
 
 test('version snapshot is immutable when a new KB version appears', () => {

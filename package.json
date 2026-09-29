@@ -7,6 +7,7 @@
     "kb:build": "node scripts/import-knowledge-base.mjs --write",
     "instrument:build": "node scripts/build-instrument.mjs",
     "instrument:migrate": "node scripts/migrate-instrument-v03.mjs",
+    "domain-plans:migrate": "node scripts/migrate-domain-plans-v11.mjs",
     "test": "node --test"
   }
 }
