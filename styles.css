@@ -102,6 +102,9 @@ h3 { font-size: 18px; letter-spacing: -.3px; margin-bottom: 7px; }
 .badge.success { background: #e5f4ed; color: var(--success); }
 .badge.neutral { background: #eef1f0; color: #66736f; }
 .badge.danger { background: #fff0f0; color: var(--danger); }
+.environment-badge { display: inline-flex; align-items: center; min-height: 24px; padding: 4px 9px; border-radius: 999px; font-size: 10px; font-weight: 900; letter-spacing: .09em; border: 1px solid transparent; }
+.environment-badge.staging { color: #76531b; background: #fff3d9; border-color: #efd39a; }
+.environment-badge.production { color: #8f2727; background: #ffeded; border-color: #efb8b8; }
 .divider { height: 1px; background: var(--line); margin: 20px 0; }
 
 .form-group { display: grid; gap: 8px; margin-bottom: 16px; }
@@ -138,6 +141,7 @@ label { font-size: 13px; font-weight: 800; color: #32534a; }
 .login-form-wrap { padding: 36px; display: grid; place-items: center; }
 .login-form { width: min(430px, 100%); }
 .login-form .card { padding: clamp(25px, 4vw, 34px); box-shadow: var(--shadow); }
+.login-card-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 
 /* dashboard */
 .hero-panel {

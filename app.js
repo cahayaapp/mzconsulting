@@ -1,4 +1,5 @@
-import { auth, db } from './firebase-config.js';
+import { auth, db, FIREBASE_ENVIRONMENT } from './firebase-config.js';
+import { firebaseAuthErrorMessage } from './lib/auth-errors.js';
 import { DOMAINS, SCALE_OPTIONS, getStage, getQuestion, getDomain } from './questions.js';
 import {
   buildFindings,
@@ -134,6 +135,10 @@ function iconLabel(projectName = '') {
   return words.slice(0, 2).map(w => w[0]).join('').toUpperCase() || 'MZ';
 }
 function isConsultantUser(user) { return !!user?.email && !user?.isAnonymous; }
+function environmentBadgeHtml() {
+  const name = FIREBASE_ENVIRONMENT.name.toUpperCase();
+  return `<span class="environment-badge ${name.toLowerCase()}" title="Firebase project: ${escapeHtml(FIREBASE_ENVIRONMENT.projectId)}">${escapeHtml(name)}</span>`;
+}
 
 async function safeGet(path) {
   const snap = await get(ref(db, path));
@@ -198,7 +203,7 @@ function renderLogin() {
       <section class="login-form-wrap">
         <form id="loginForm" class="login-form">
           <div class="card">
-            <div class="eyebrow">Ruang Konsultan</div>
+            <div class="login-card-head"><div class="eyebrow">Ruang Konsultan</div>${environmentBadgeHtml()}</div>
             <h2 style="margin:8px 0 8px">Masuk ke MZ Consulting</h2>
             <p class="lead small">Gunakan akun Email/Password yang dibuat di Firebase Authentication.</p>
             <div class="form-group"><label for="email">Email</label><input class="input" type="email" id="email" autocomplete="username" required placeholder="email@contoh.com"></div>
@@ -219,7 +224,7 @@ function renderLogin() {
     setButtonLoading(submit, true, 'Memeriksa akun…');
     try { await signInWithEmailAndPassword(auth, email, password); }
     catch (error) {
-      err.textContent = 'Email atau kata sandi belum cocok. Pastikan akun sudah dibuat di Firebase Authentication.';
+      err.textContent = firebaseAuthErrorMessage(error, FIREBASE_ENVIRONMENT);
       setButtonLoading(submit, false);
       document.querySelector('#email').focus();
     }
@@ -239,7 +244,8 @@ function consultantShell(content) {
           <div class="top-actions">
             <button class="btn btn-ghost btn-sm hide-mobile" id="toolkitLibraryBtn">Toolkit</button>
             <button class="btn btn-ghost btn-sm hide-mobile" id="knowledgeBaseBtn">Knowledge Base</button>
-            <span class="small muted hide-mobile">${escapeHtml(state.user?.email || '')}</span>
+            ${environmentBadgeHtml()}
+            <span class="small muted hide-mobile">${escapeHtml(state.userProfile?.role || 'consultant')} · ${escapeHtml(state.user?.email || '')}</span>
             <button class="btn btn-ghost btn-sm" id="logoutBtn">Keluar</button>
           </div>
         </div>
