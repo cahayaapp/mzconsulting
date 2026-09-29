@@ -3,6 +3,7 @@ import { firebaseAuthErrorMessage } from './lib/auth-errors.js';
 import { DOMAINS, SCALE_OPTIONS, getStage, getQuestion, getDomain } from './questions.js';
 import { ACTIVE_INSTRUMENT_VERSION, answerFromOption, answerSignal, createVersionedInvite, createVersionedProject, effectiveInstrumentVersion, getAllQuestionDefinitions, getQuestionDefinition, renderAnswerOptions } from './lib/instrument.js';
 import { DOMAIN_PLAN_STATUSES, MATURITY_LABELS, addOrMergeDomainPlan, buildDomainPlanSnapshot, buildDomainSummary, buildNextLevelRequirements, progressOf, verifyDomainPlan } from './lib/domain-plan-engine.js';
+import { INTERVENTION_STATUSES, MATURITY_JOURNEY, buildKnowledgeInterventions, currentConditionNarrative, domainMaturityDescription, maturityMarkerPosition, mergeInterventionQueue, resolveMaturityPosition, validateIntervention } from './lib/consultant-intervention-engine.js';
 import {
   buildFindings,
   buildRoadmap,
@@ -564,9 +565,9 @@ function renderProjectTab(projectId, project, bundle, analytics, tab) {
   if (tab === 'perspectives') return perspectivesHtml(project, bundle);
   if (tab === 'compare') return compareHtml(project, analytics);
   if (tab === 'recommendations') return recommendationsHtml(project, analytics);
-  if (tab === 'followup') return `<div id="followupSlot"><div class="card card-pad">Memuat tindak lanjut…</div></div>`;
+  if (tab === 'interventions' || tab === 'followup') return `<div id="interventionSlot"><div class="card card-pad"><span class="spinner spinner-dark" aria-hidden="true"></span> Menyusun intervensi dari Knowledge Base…</div></div>`;
   if (tab === 'transformation') return `<div id="transformationSlot"><div class="card card-pad"><span class="spinner spinner-dark" aria-hidden="true"></span> Menyusun rekomendasi berbasis playbook…</div></div>`;
-  return overviewHtml(project, analytics);
+  return analytics.submittedCount ? `<div id="maturityOverviewSlot"><div class="card card-pad"><span class="spinner spinner-dark" aria-hidden="true"></span> Menyusun peta perjalanan maturity…</div></div>` : overviewHtml(project, analytics);
 }
 
 function overviewHtml(project, analytics) {
@@ -577,29 +578,100 @@ function overviewHtml(project, analytics) {
       <div class="card card-pad"><div class="eyebrow">Bidang yang dipilih</div><h3 style="margin-top:7px">${domains.length} bidang asesmen</h3><div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:14px">${domains.map(d => `<span class="badge neutral">${d.code} · ${escapeHtml(d.title)}</span>`).join('')}</div><div class="divider"></div><p class="lead small">Setiap perspektif mendapat 10 pertanyaan per bidang. Hasil baru akan bermakna setelah ada jawaban yang dapat dibandingkan.</p></div>
     </div>`;
   }
-  const stage = getStage(analytics.overall);
-  return `
-    <div class="grid grid-2">
-      <div class="card position-card">
-        <div class="position-score"><strong>${scoreText(analytics.overall)}</strong><span>dari 5</span></div>
-        <div><span class="badge">${stage.badge}</span><h2 style="margin-top:10px">${stage.name}</h2><p class="lead small">${escapeHtml(stage.description)}</p><p class="helper">Ini gambaran awal dari ${analytics.submittedCount} perspektif yang sudah mengirim jawaban, bukan keputusan audit final.</p></div>
-      </div>
-      <div class="card card-pad">
-        <div class="section-head"><div><div class="eyebrow">Catatan konsultan</div><h3 style="margin-top:5px">Apa yang paling perlu dibahas?</h3></div></div>
-        <textarea class="textarea" id="analysisNote" placeholder="Tulis analisis awal setelah membaca hasil…">${escapeHtml(project.analysisNote || '')}</textarea>
-        <div style="display:flex;justify-content:flex-end;margin-top:10px"><button class="btn btn-primary btn-sm" id="saveAnalysis">Simpan catatan</button></div>
-      </div>
-    </div>
-    <section style="margin-top:20px">
-      <div class="section-head"><div><div class="eyebrow">Posisi per bidang</div><h2 style="margin-top:5px">Di mana yang sudah kuat, di mana yang perlu dibenahi?</h2></div></div>
-      <div class="grid grid-3">${domains.map(domain => domainResultHtml(domain, analytics.domainAggregate[domain.id], analytics.domainGaps[domain.id])).join('')}</div>
-    </section>
-    <section class="card card-pad" style="margin-top:20px">
-      <div class="grid grid-2" style="align-items:end">
-        <div><div class="eyebrow">Status pendampingan</div><h3 style="margin-top:5px">Apa langkah setelah hasil dibahas?</h3><p class="lead small">Status ini hanya catatan kerja konsultan dan tidak memengaruhi hasil asesmen.</p></div>
-        <div class="form-group" style="margin:0"><label>Status</label><select class="select" id="engagementStatus">${['Belum dibahas','Tertarik didampingi','Akan lanjut sendiri','Belum melanjutkan'].map(v => `<option ${project.engagementStatus === v ? 'selected' : ''}>${v}</option>`).join('')}</select></div>
-      </div>
-    </section>`;
+  return '';
+}
+
+function maturityJourneyHtml(position, domainCode) {
+  if (position.markerValue == null) return '<div class="maturity-empty">Belum ada posisi yang dapat ditampilkan.</div>';
+  const marker = maturityMarkerPosition(position.markerValue);
+  const averageMarker = position.verifiedMaturity != null ? maturityMarkerPosition(position.averagePerspective) : null;
+  return `<div class="maturity-journey" aria-label="Perjalanan maturity 5 tingkat">
+    <div class="maturity-track" aria-hidden="true"></div>
+    ${averageMarker != null ? `<span class="average-position-marker" style="left:${averageMarker}%" title="Average Perspektif ${scoreText(position.averagePerspective)}"></span>` : ''}
+    <div class="current-position-marker" style="left:${marker}%;--marker:${marker}"><span class="current-marker-dot" aria-hidden="true">◆</span><strong>Posisi Saat Ini</strong></div>
+    <div class="maturity-points">${MATURITY_JOURNEY.map(stage => `<button type="button" class="maturity-point ${stage.level === position.displayLevel ? 'active' : ''}" data-maturity-point="${domainCode}:${stage.level}" aria-label="Level ${stage.level} — ${escapeHtml(stage.label)}: ${escapeHtml(stage.description)}"><span>${stage.level}</span><small>${escapeHtml(stage.label)}</small></button>`).join('')}</div>
+  </div>`;
+}
+
+function domainMaturityCardHtml({ domain, summary, context, analytics }) {
+  const domainPlan = context.stored.domainPlans?.[domain.code] || {};
+  const validatedMaturity = domainPlan.verifiedMaturity || (domainPlan.status === 'Terverifikasi' ? domainPlan.targetMaturity : null);
+  const position = resolveMaturityPosition({ average: summary.average, validatedMaturity });
+  const playbooks = context.knowledgeBase.playbooks.filter(item => item.domain_code === domain.code && item.active !== false);
+  const maturityCopy = domainMaturityDescription(playbooks, position.displayLevel || 1);
+  const stats = analytics.questionStats.filter(item => item.domainId === domain.id).sort((a, b) => a.average - b.average);
+  const weakest = stats[0] ? getQuestion(stats[0].questionId)?.text : '';
+  const strongest = stats.at(-1) ? getQuestion(stats.at(-1).questionId)?.text : '';
+  const relevantRecommendations = context.recommendations.filter(item => context.knowledgeBase.playbooks.find(playbook => playbook.id === item.playbook_id)?.domain_code === domain.code);
+  const confidence = relevantRecommendations.some(item => item.evidence_warning) ? 'Low' : 'Normal';
+  const narrative = currentConditionNarrative({ summary, domainName: domain.title, strongestIndicator: strongest, weakestIndicator: weakest, perceptionGap: analytics.domainGaps[domain.id], evidenceConfidence: confidence, validatedMaturity });
+  const requirements = buildNextLevelRequirements({ domain, summary, questionValues: analytics.questionValues, getDefinition: getQuestionDefinition });
+  const missing = requirements.filter(item => !item.completed).length;
+  const next = summary.targetMaturity ? MATURITY_JOURNEY[summary.targetMaturity - 1] : null;
+  return `<article class="card maturity-domain-card">
+    <div class="maturity-domain-head"><div><span class="badge neutral">${domain.code}</span><h3>${escapeHtml(domain.title)}</h3></div><div class="maturity-summary"><strong>${scoreText(summary.average)}</strong><span>Average Perspektif</span></div></div>
+    <div class="maturity-stat-strip"><span><small>Terendah</small><strong>${scoreText(summary.min)}</strong></span><span><small>Tertinggi</small><strong>${scoreText(summary.max)}</strong></span><span><small>Perspektif</small><strong>${summary.respondentCount}</strong></span><span><small>Maturity</small><strong>Level ${position.displayLevel || '—'}</strong></span></div>
+    ${maturityJourneyHtml(position, domain.code)}
+    <div class="position-verification-label"><span aria-hidden="true">◎</span> ${escapeHtml(position.label)}${position.verifiedMaturity ? ` · Level ${position.verifiedMaturity}` : ''}</div>
+    <section class="current-condition"><div class="eyebrow">Kondisi Saat Ini</div><p>${escapeHtml(narrative)}</p><small>${escapeHtml(maturityCopy.description)} <span class="source-tag">${escapeHtml(maturityCopy.source)}</span></small></section>
+    <div class="next-stage-summary"><div><small>Tahap berikutnya</small><strong>${next ? `Level ${next.level} — ${escapeHtml(next.label)}` : 'Tahap tertinggi / perlu verifikasi'}</strong></div><p>${next ? `Untuk mencapai tahap berikutnya, terdapat ${missing} requirement yang masih perlu dipenuhi.` : 'Tidak ada kenaikan level otomatis. Kondisi tetap perlu diverifikasi konsultan.'}</p></div>
+    <button class="btn btn-secondary btn-sm" data-open-domain-recommendation="${domain.code}">Lihat Detail</button>
+  </article>`;
+}
+
+async function renderMaturityOverview(projectId, project, analytics) {
+  const slot = document.querySelector('#maturityOverviewSlot');
+  if (!slot) return;
+  try {
+    const context = await getTransformationContext(projectId, analytics);
+    const domains = selectedDomains(project);
+    const cards = domains.map(domain => domainMaturityCardHtml({ domain, summary: analytics.domainSummaries.find(item => item.domainCode === domain.code), context, analytics }));
+    const buckets = Object.fromEntries(MATURITY_JOURNEY.map(stage => [stage.level, 0]));
+    domains.forEach(domain => {
+      const summary = analytics.domainSummaries.find(item => item.domainCode === domain.code);
+      const plan = context.stored.domainPlans?.[domain.code] || {};
+      const level = resolveMaturityPosition({ average: summary.average, validatedMaturity: plan.verifiedMaturity || (plan.status === 'Terverifikasi' ? plan.targetMaturity : null) }).displayLevel;
+      if (level) buckets[level] += 1;
+    });
+    const safety = context.recommendations.filter(item => item.safety_override);
+    slot.innerHTML = `<section class="maturity-map-head"><div><div class="eyebrow">Gambaran Awal</div><h2>Peta Perjalanan Pesantren</h2><p class="lead small">Menunjukkan posisi setiap bidang berdasarkan perspektif yang masuk. Tidak ada overall score dan tidak ada ranking lembaga.</p></div><div class="maturity-buckets">${MATURITY_JOURNEY.filter(stage => buckets[stage.level]).map(stage => `<span><strong>${buckets[stage.level]}</strong> bidang ${escapeHtml(stage.label)}</span>`).join('')}</div></section>
+      ${safety.length ? `<section class="safety-callout"><div><strong>Perhatian segera diperlukan</strong><p>${safety.length} sinyal keselamatan/risiko perlu ditangani melalui intervensi khusus. P0 bukan maturity level.</p></div><button class="btn btn-danger btn-sm" data-go-tab="interventions">Buka intervensi keselamatan</button></section>` : ''}
+      <div class="maturity-domain-grid">${cards.join('')}</div>
+      <section class="card card-pad overview-notes"><div><div class="eyebrow">Catatan konsultan</div><h3>Apa yang perlu dikonfirmasi dari gambaran ini?</h3><p class="helper">Catatan internal ini tidak mengubah maturity dan tidak ditampilkan kepada klien.</p></div><textarea class="textarea" id="analysisNote" placeholder="Tulis analisis awal setelah membaca hasil…">${escapeHtml(project.analysisNote || '')}</textarea><div class="overview-note-actions"><select class="select" id="engagementStatus">${['Belum dibahas','Tertarik didampingi','Akan lanjut sendiri','Belum melanjutkan'].map(v => `<option ${project.engagementStatus === v ? 'selected' : ''}>${v}</option>`).join('')}</select><button class="btn btn-primary btn-sm" id="saveAnalysis">Simpan catatan</button></div></section>`;
+    bindMaturityOverview(projectId, project, analytics);
+  } catch (error) {
+    console.error(error);
+    slot.innerHTML = emptyHtml('Peta maturity belum dapat dimuat', 'Periksa koneksi dan akses Knowledge Base, lalu coba lagi.', '<button class="btn btn-primary" id="retryMaturityOverview">Coba lagi</button>');
+    document.querySelector('#retryMaturityOverview')?.addEventListener('click', () => renderMaturityOverview(projectId, project, analytics));
+  }
+}
+
+function bindMaturityOverview(projectId, project, analytics) {
+  document.querySelectorAll('[data-go-tab]').forEach(btn => btn.addEventListener('click', () => renderProject(projectId, btn.dataset.goTab)));
+  document.querySelectorAll('[data-open-domain-recommendation]').forEach(btn => btn.addEventListener('click', () => openDomainRecommendationModal(projectId, project, analytics, btn.dataset.openDomainRecommendation)));
+  document.querySelectorAll('[data-maturity-point]').forEach(btn => btn.addEventListener('click', () => {
+    const [domainCode, levelValue] = btn.dataset.maturityPoint.split(':');
+    openMaturityStageModal(domainCode, Number(levelValue));
+  }));
+  document.querySelector('#saveAnalysis')?.addEventListener('click', async () => {
+    await update(ref(db, `projects/${projectId}`), { analysisNote: document.querySelector('#analysisNote').value.trim(), updatedAt: now() });
+    showToast('Catatan analisis disimpan.');
+  });
+  document.querySelector('#engagementStatus')?.addEventListener('change', async event => {
+    await update(ref(db, `projects/${projectId}`), { engagementStatus: event.target.value, updatedAt: now() });
+    showToast('Status pendampingan diperbarui.');
+  });
+}
+
+function openMaturityStageModal(domainCode, level) {
+  const domain = DOMAINS.find(item => item.code === domainCode);
+  const stage = MATURITY_JOURNEY[level - 1];
+  const playbooks = (state.knowledgeBase?.playbooks || []).filter(item => item.domain_code === domainCode && item.active !== false);
+  const specific = domainMaturityDescription(playbooks, level);
+  const modal = document.createElement('div');
+  modal.className = 'modal-backdrop';
+  modal.innerHTML = `<div class="modal stage-modal" role="dialog" aria-modal="true" aria-labelledby="maturityStageTitle"><div class="modal-head"><div><div class="eyebrow">${domainCode} · Tahap ${level}</div><h2 id="maturityStageTitle">${escapeHtml(stage.label)}</h2></div><button type="button" class="icon-btn" data-close aria-label="Tutup dialog">×</button></div><div class="modal-body"><p class="lead">${escapeHtml(stage.description)}</p><section class="detail-section highlight"><h3>${escapeHtml(domain?.title || domainCode)}</h3><p>${escapeHtml(specific.description)}</p><span class="source-tag">Sumber: ${escapeHtml(specific.source)}</span></section></div><div class="modal-foot"><button class="btn btn-primary" data-close>Tutup</button></div></div>`;
+  mountModal(modal, '[data-close]');
 }
 
 function domainResultHtml(domain, score, gap) {
@@ -666,6 +738,10 @@ async function followupHtml(projectId) {
 function bindProjectTab(projectId, project, bundle, analytics, tab) {
   document.querySelectorAll('[data-go-tab]').forEach(btn => btn.addEventListener('click', () => renderProject(projectId, btn.dataset.goTab)));
   if (tab === 'overview') {
+    if (analytics.submittedCount) {
+      renderMaturityOverview(projectId, project, analytics);
+      return;
+    }
     document.querySelector('#saveAnalysis')?.addEventListener('click', async () => {
       await update(ref(db, `projects/${projectId}`), { analysisNote: document.querySelector('#analysisNote').value.trim(), updatedAt: now() });
       showToast('Catatan analisis disimpan.');
@@ -700,14 +776,7 @@ function bindProjectTab(projectId, project, bundle, analytics, tab) {
   if (tab === 'recommendations') {
     document.querySelectorAll('[data-open-domain-recommendation]').forEach(btn => btn.addEventListener('click', () => openDomainRecommendationModal(projectId, project, analytics, btn.dataset.openDomainRecommendation)));
   }
-  if (tab === 'followup') {
-    followupHtml(projectId).then(html => {
-      const slot = document.querySelector('#followupSlot');
-      if (!slot) return;
-      slot.innerHTML = html;
-      bindFollowups(projectId);
-    });
-  }
+  if (tab === 'interventions' || tab === 'followup') renderConsultantInterventions(projectId, project, analytics);
   if (tab === 'transformation') renderTransformationPlan(projectId, project, analytics);
 }
 
@@ -804,6 +873,125 @@ function openFollowupModal(projectId) {
   });
 }
 
+function interventionActionLabel(type) {
+  return ({ INTERVIEW: 'Buka Form Wawancara', CLARIFICATION: 'Mulai Klarifikasi', DOCUMENT_REVIEW: 'Mulai Telaah', OBSERVATION: 'Buka Form Observasi', WORKSHOP: 'Siapkan Workshop', TOOL_TEMPLATE: 'Buka Tool', ANALYSIS: 'Mulai Analisis', IMPLEMENTATION: 'Buka Pendampingan', VERIFICATION: 'Mulai Verifikasi', EFFECTIVENESS_REVIEW: 'Mulai Review', SPECIALIST_REFERRAL: 'Tinjau Rujukan' })[type] || 'Buka Detail';
+}
+
+function interventionTypeLabel(type) {
+  if (type === 'TOOL_TEMPLATE') return 'TOOL / TEMPLATE';
+  return String(type || '').replaceAll('_', ' ');
+}
+
+function interventionFormHtml(item) {
+  const form = item.form || {};
+  if (item.type === 'INTERVIEW') return `<div class="grid grid-2"><div class="form-group"><label>Orang yang diwawancarai</label><input class="input" data-form-field="interviewee" value="${escapeHtml(form.interviewee || '')}"></div><div class="form-group"><label>Jabatan</label><input class="input" data-form-field="role" value="${escapeHtml(form.role || '')}"></div><div class="form-group"><label>Tanggal</label><input type="date" class="input" data-form-field="date" value="${escapeHtml(form.date || '')}"></div><div class="form-group"><label>Durasi yang disarankan</label><input class="input" data-form-field="suggestedDuration" value="${escapeHtml(form.suggestedDuration || '')}"></div></div><section class="interview-questions"><h3>Daftar pertanyaan</h3><p class="helper">Pertanyaan bersumber dari diagnosis questions Knowledge Base. Konsultan dapat mengedit atau menambah pertanyaan sebelum wawancara.</p>${toArray(form.questions).map((question, index) => `<article><input class="input" data-interview-question="${index}" value="${escapeHtml(question.question || question)}"><textarea class="textarea" data-interview-answer="${index}" placeholder="Catatan jawaban">${escapeHtml(question.answerNotes || '')}</textarea></article>`).join('')}<button type="button" class="btn btn-ghost btn-sm" id="addInterviewQuestion">＋ Tambah pertanyaan</button></section><div class="form-group"><label>Insight konsultan</label><textarea class="textarea" data-form-field="consultantInsight">${escapeHtml(form.consultantInsight || '')}</textarea></div><div class="form-group"><label>Evidence / reference</label><input class="input" data-form-field="evidenceReference" value="${escapeHtml(form.evidenceReference || '')}"></div><div class="form-group"><label>Kesimpulan</label><textarea class="textarea" data-form-field="conclusion">${escapeHtml(form.conclusion || '')}</textarea></div><div class="form-group"><label>Next action</label><textarea class="textarea" data-form-field="nextAction">${escapeHtml(form.nextAction || '')}</textarea></div>`;
+  if (item.type === 'CLARIFICATION') return `<div class="notice neutral">Sumber yang ditampilkan hanya ringkasan agregat. Identitas dan raw confidential responses tidak dimuat ke form ini.</div><div class="grid grid-2"><div class="form-group"><label>Pihak yang perlu diklarifikasi</label><input class="input" data-form-field="parties" value="${escapeHtml(form.parties || '')}"></div><div class="form-group"><label>Construct / indikator</label><input class="input" data-form-field="construct" value="${escapeHtml(form.construct || '')}"></div></div><div class="form-group"><label>Source responses</label><textarea class="textarea" data-form-field="sourceSummary" readonly>${escapeHtml(form.sourceSummary || '')}</textarea></div><div class="form-group"><label>Pertanyaan klarifikasi</label><textarea class="textarea" data-array-field="questions">${escapeHtml(toArray(form.questions).join('\n'))}</textarea></div><div class="form-group"><label>Hasil klarifikasi</label><textarea class="textarea" data-form-field="result">${escapeHtml(form.result || '')}</textarea></div><label class="check-line"><input type="checkbox" data-form-field="resolved" ${form.resolved ? 'checked' : ''}> Gap sudah terselesaikan</label><div class="form-group"><label>Evidence</label><input class="input" data-form-field="evidence" value="${escapeHtml(form.evidence || '')}"></div><div class="form-group"><label>Perubahan diagnosis bila ada</label><textarea class="textarea" data-form-field="diagnosisChange">${escapeHtml(form.diagnosisChange || '')}</textarea></div>`;
+  if (item.type === 'DOCUMENT_REVIEW') return `<div class="grid grid-2"><div class="form-group"><label>Dokumen yang diperiksa</label><input class="input" data-form-field="documentName" value="${escapeHtml(form.documentName || '')}"></div><div class="form-group"><label>Versi</label><input class="input" data-form-field="version" value="${escapeHtml(form.version || '')}"></div><div class="form-group"><label>Tanggal telaah</label><input type="date" class="input" data-form-field="reviewDate" value="${escapeHtml(form.reviewDate || '')}"></div><div class="form-group"><label>Evidence code</label><input class="input" data-form-field="evidenceCode" value="${escapeHtml(form.evidenceCode || '')}"></div></div>${['criteria','findings','gaps','conclusion','followUp'].map(field => `<div class="form-group"><label>${({ criteria:'Kriteria', findings:'Temuan', gaps:'Gap', conclusion:'Kesimpulan', followUp:'Follow-up' })[field]}</label><textarea class="textarea" data-form-field="${field}">${escapeHtml(form[field] || '')}</textarea></div>`).join('')}`;
+  if (item.type === 'WORKSHOP') return `<div class="form-group"><label>Tujuan</label><textarea class="textarea" readonly>${escapeHtml(item.purpose || '')}</textarea></div><div class="form-group"><label>Peserta yang disarankan</label><input class="input" data-form-field="participants" value="${escapeHtml(form.participants || '')}"></div><div class="form-group"><label>Agenda</label><textarea class="textarea" data-form-field="agenda">${escapeHtml(form.agenda || '')}</textarea></div><div class="form-group"><label>Output</label><input class="input" data-form-field="expectedOutput" value="${escapeHtml(form.expectedOutput || '')}"></div><div class="form-group"><label>Toolkit</label><input class="input" data-array-field="toolkitCodes" value="${escapeHtml(toArray(form.toolkitCodes).join(', '))}"></div><div class="form-group"><label>Preparation checklist</label><textarea class="textarea" data-array-field="preparationChecklist">${escapeHtml(toArray(form.preparationChecklist).join('\n'))}</textarea></div><div class="form-group"><label>Catatan fasilitasi</label><textarea class="textarea" data-form-field="notes">${escapeHtml(form.notes || '')}</textarea></div>`;
+  if (item.type === 'TOOL_TEMPLATE') return `<section class="tool-detail"><div class="eyebrow">${escapeHtml(item.toolkit?.code || '')}</div><h3>${escapeHtml(item.toolkit?.name || item.title)}</h3><p>${escapeHtml(item.toolkit?.purpose || item.purpose || '')}</p><dl><dt>Langkah penggunaan</dt><dd>${escapeHtml(item.toolkit?.usage || 'Ikuti instruksi playbook dan sesuaikan dengan konteks project.')}</dd><dt>Output yang diharapkan</dt><dd>${escapeHtml(item.toolkit?.expectedOutput || 'Output kerja terdokumentasi.')}</dd></dl><div class="grid grid-2"><div class="form-group"><label>Status tool</label><select class="select" data-tool-field="status">${['Belum digunakan','Sedang digunakan','Output tersedia','Diverifikasi'].map(status => `<option ${item.toolkit?.status === status ? 'selected' : ''}>${status}</option>`).join('')}</select></div><div class="form-group"><label>Upload/link hasil</label><input class="input" data-tool-field="outputReference" value="${escapeHtml(item.toolkit?.outputReference || '')}" placeholder="URL atau kode evidence"></div></div></section>`;
+  const keys = Object.keys(form).filter(key => typeof form[key] !== 'object');
+  return keys.length ? keys.map(key => `<div class="form-group"><label>${escapeHtml(key.replaceAll(/([A-Z])/g, ' $1'))}</label><textarea class="textarea" data-form-field="${escapeHtml(key)}">${escapeHtml(form[key] ?? '')}</textarea></div>`).join('') : `<p class="lead small">${escapeHtml(item.purpose || '')}</p>`;
+}
+
+function interventionCardHtml(item) {
+  return `<article class="card intervention-card ${item.priority === 'P0' ? 'safety' : ''}"><div class="intervention-card-top"><div><span class="intervention-type">${escapeHtml(interventionTypeLabel(item.type))}</span><h3>${escapeHtml(item.title)}</h3></div><span class="status-pill">${escapeHtml(item.status || 'Disarankan Sistem')}</span></div><p>${escapeHtml(item.purpose || '')}</p><div class="intervention-trace"><span>${escapeHtml(item.domainCode || '')}</span><span>${escapeHtml(item.playbookCode || '')}@${escapeHtml(item.playbookVersion || '')}</span><span>Sumber: ${escapeHtml(item.source?.field || '')}</span></div><div class="intervention-meta"><span><small>PIC Konsultan</small>${escapeHtml(item.consultantPIC || 'Belum ditetapkan')}</span><span><small>Peserta</small>${escapeHtml(item.participants || item.form?.participants || item.form?.role || '—')}</span><span><small>Jatuh tempo</small>${escapeHtml(item.dueDate || '—')}</span></div><button class="btn btn-secondary btn-sm" data-open-intervention="${escapeHtml(item.id)}">${interventionActionLabel(item.type)}</button></article>`;
+}
+
+async function renderConsultantInterventions(projectId, project, analytics) {
+  const slot = document.querySelector('#interventionSlot');
+  if (!slot) return;
+  try {
+    const context = await getTransformationContext(projectId, analytics);
+    const byDomain = new Map();
+    context.recommendations.forEach(recommendation => {
+      const playbook = context.knowledgeBase.playbooks.find(item => item.id === recommendation.playbook_id || item.code === recommendation.playbook_code);
+      if (playbook && !byDomain.has(playbook.domain_code)) byDomain.set(playbook.domain_code, { playbook, recommendation });
+    });
+    const generated = [];
+    for (const [domainCode, value] of byDomain) {
+      const domain = DOMAINS.find(item => item.code === domainCode);
+      generated.push(...buildKnowledgeInterventions({ playbook: value.playbook, recommendation: value.recommendation, perceptionGap: analytics.domainGaps[domain?.id] || 0, evidenceGap: value.recommendation.evidence_warning, safetyFlag: value.recommendation.safety_override }));
+    }
+    const queue = mergeInterventionQueue(context.stored.consultantInterventions || {}, generated);
+    const newItems = Object.values(queue).filter(item => !context.stored.consultantInterventions?.[item.id]);
+    if (newItems.length) {
+      const updates = {};
+      newItems.forEach(item => { updates[`projectTransformations/${projectId}/consultantInterventions/${item.id}`] = item; });
+      updates[`projectTransformations/${projectId}/interventionVersion`] = '1.0';
+      await update(ref(db), updates);
+    }
+    const items = Object.values(queue).sort((a, b) => Number(b.priority === 'P0') - Number(a.priority === 'P0') || INTERVENTION_STATUSES.indexOf(a.status) - INTERVENTION_STATUSES.indexOf(b.status));
+    const oldFollowups = (await safeGet(`followups/${projectId}`)) || {};
+    slot.innerHTML = `<div class="section-head intervention-head"><div><div class="eyebrow">Workspace Konsultan</div><h2>Intervensi yang Harus Saya Lakukan</h2><p class="lead small">Langkah konkret konsultan untuk memahami atau membantu menutup gap. Queue ini berbeda dari action organisasi klien di Transformation Plan.</p></div><div class="queue-summary"><strong>${items.length}</strong><span>intervensi berbasis KB</span></div></div>
+      ${items.some(item => item.priority === 'P0') ? '<div class="safety-callout"><div><strong>Intervensi safety diprioritaskan</strong><p>P0 ditampilkan terpisah dari maturity dan perlu ditangani sesuai batas kompetensi serta jalur rujukan.</p></div></div>' : ''}
+      <div class="intervention-filter"><select class="select" id="interventionDomainFilter"><option value="">Semua bidang</option>${selectedDomains(project).map(domain => `<option value="${domain.code}">${domain.code} · ${escapeHtml(domain.title)}</option>`).join('')}</select><select class="select" id="interventionTypeFilter"><option value="">Semua jenis</option>${[...new Set(items.map(item => item.type))].map(type => `<option value="${type}">${escapeHtml(interventionTypeLabel(type))}</option>`).join('')}</select></div>
+      ${items.length ? `<div class="intervention-queue">${items.map(interventionCardHtml).join('')}</div>` : emptyHtml('Belum ada intervensi', 'Intervensi akan diturunkan dari playbook setelah hasil diagnosis menghasilkan rekomendasi yang relevan.')}
+      ${Object.keys(oldFollowups).length ? `<details class="card internal-engine-panel"><summary>Tindak lanjut lama (${Object.keys(oldFollowups).length})</summary><div class="internal-engine-body"><p class="helper">Data lama dipertahankan untuk kompatibilitas dan tidak diubah menjadi intervensi secara otomatis.</p>${Object.values(oldFollowups).map(item => `<div class="legacy-followup"><strong>${escapeHtml(item.title)}</strong><span>${escapeHtml(item.action || '')}</span></div>`).join('')}</div></details>` : ''}`;
+    bindInterventionQueue(projectId, project, analytics, queue);
+  } catch (error) {
+    console.error(error);
+    slot.innerHTML = emptyHtml('Intervensi belum dapat dimuat', 'Periksa koneksi dan akses Knowledge Base, lalu coba lagi.', '<button class="btn btn-primary" id="retryInterventions">Coba lagi</button>');
+    document.querySelector('#retryInterventions')?.addEventListener('click', () => renderConsultantInterventions(projectId, project, analytics));
+  }
+}
+
+function bindInterventionQueue(projectId, project, analytics, queue) {
+  const filter = () => {
+    const domain = document.querySelector('#interventionDomainFilter')?.value || '';
+    const type = document.querySelector('#interventionTypeFilter')?.value || '';
+    document.querySelectorAll('[data-open-intervention]').forEach(button => {
+      const item = queue[button.dataset.openIntervention];
+      button.closest('.intervention-card').hidden = Boolean((domain && item.domainCode !== domain) || (type && item.type !== type));
+    });
+  };
+  document.querySelector('#interventionDomainFilter')?.addEventListener('change', filter);
+  document.querySelector('#interventionTypeFilter')?.addEventListener('change', filter);
+  document.querySelectorAll('[data-open-intervention]').forEach(button => button.addEventListener('click', () => openInterventionModal(projectId, project, analytics, queue[button.dataset.openIntervention])));
+}
+
+function openInterventionModal(projectId, project, analytics, item) {
+  if (!item) return;
+  const modal = document.createElement('div');
+  modal.className = 'modal-backdrop';
+  modal.innerHTML = `<div class="modal playbook-modal" role="dialog" aria-modal="true" aria-labelledby="interventionTitle"><div class="modal-head"><div><div class="eyebrow">${escapeHtml(interventionTypeLabel(item.type))} · ${escapeHtml(item.playbookCode)}@${escapeHtml(item.playbookVersion)}</div><h2 id="interventionTitle">${escapeHtml(item.title)}</h2></div><button type="button" class="icon-btn" data-close aria-label="Tutup dialog">×</button></div><form id="interventionForm"><div class="modal-body"><div class="notice neutral"><strong>Tujuan:</strong> ${escapeHtml(item.purpose || '')}<br><small>Traceability: ${escapeHtml(item.source?.field || '')} pada ${escapeHtml(item.playbookCode)} versi ${escapeHtml(item.playbookVersion)}</small></div><div class="grid grid-2"><div class="form-group"><label>PIC consultant</label><input class="input" id="interventionPic" value="${escapeHtml(item.consultantPIC || '')}"></div><div class="form-group"><label>Participant</label><input class="input" id="interventionParticipants" value="${escapeHtml(item.participants || '')}"></div><div class="form-group"><label>Due date</label><input type="date" class="input" id="interventionDueDate" value="${escapeHtml(item.dueDate || '')}"></div><div class="form-group"><label>Status</label><select class="select" id="interventionStatus">${INTERVENTION_STATUSES.map(status => `<option ${item.status === status ? 'selected' : ''}>${status}</option>`).join('')}</select></div></div><section class="detail-section">${interventionFormHtml(item)}</section><div class="grid grid-2"><div class="form-group"><label>Output</label><textarea class="textarea" id="interventionOutput">${escapeHtml(item.output || '')}</textarea></div><div class="form-group"><label>Evidence</label><textarea class="textarea" id="interventionEvidence">${escapeHtml(item.evidence || '')}</textarea></div></div><div class="form-group"><label>Next intervention</label><input class="input" id="nextIntervention" value="${escapeHtml(item.nextIntervention || '')}"></div><div class="form-group"><label>Catatan internal konsultan</label><textarea class="textarea" id="interventionNotes">${escapeHtml(item.internalNotes || '')}</textarea><p class="helper">Catatan ini tidak masuk client view.</p></div></div><div class="modal-foot"><button type="button" class="btn btn-ghost" data-close>Batal</button>${item.consultantValidation?.status !== 'VALIDATED' ? '<button type="button" class="btn btn-secondary" id="validateIntervention">Validasi Intervensi</button>' : ''}<button class="btn btn-primary" type="submit">Simpan</button></div></form></div>`;
+  const closeModal = mountModal(modal, '#interventionPic');
+  modal.querySelector('#addInterviewQuestion')?.addEventListener('click', () => {
+    const index = modal.querySelectorAll('[data-interview-question]').length;
+    const article = document.createElement('article');
+    article.innerHTML = `<input class="input" data-interview-question="${index}" placeholder="Pertanyaan tambahan"><textarea class="textarea" data-interview-answer="${index}" placeholder="Catatan jawaban"></textarea>`;
+    modal.querySelector('.interview-questions')?.insertBefore(article, modal.querySelector('#addInterviewQuestion'));
+  });
+  const collect = () => {
+    const updated = JSON.parse(JSON.stringify(item));
+    updated.consultantPIC = modal.querySelector('#interventionPic').value.trim();
+    updated.participants = modal.querySelector('#interventionParticipants').value.trim();
+    updated.dueDate = modal.querySelector('#interventionDueDate').value;
+    updated.status = modal.querySelector('#interventionStatus').value;
+    updated.output = modal.querySelector('#interventionOutput').value.trim();
+    updated.evidence = modal.querySelector('#interventionEvidence').value.trim();
+    updated.nextIntervention = modal.querySelector('#nextIntervention').value.trim();
+    updated.internalNotes = modal.querySelector('#interventionNotes').value.trim();
+    updated.form ||= {};
+    modal.querySelectorAll('[data-form-field]').forEach(input => { updated.form[input.dataset.formField] = input.type === 'checkbox' ? input.checked : input.value.trim(); });
+    modal.querySelectorAll('[data-array-field]').forEach(input => { updated.form[input.dataset.arrayField] = input.value.split(input.tagName === 'TEXTAREA' ? '\n' : ',').map(value => value.trim()).filter(Boolean); });
+    const questions = [...modal.querySelectorAll('[data-interview-question]')];
+    if (questions.length) updated.form.questions = questions.map((input, index) => ({ id: `q${index + 1}`, question: input.value.trim(), answerNotes: modal.querySelector(`[data-interview-answer="${index}"]`)?.value.trim() || '' })).filter(row => row.question);
+    if (updated.toolkit) modal.querySelectorAll('[data-tool-field]').forEach(input => { updated.toolkit[input.dataset.toolField] = input.value.trim(); });
+    updated.updatedAt = now();
+    return updated;
+  };
+  modal.querySelector('#validateIntervention')?.addEventListener('click', async () => {
+    const updated = validateIntervention(collect(), state.user.uid, now());
+    await set(ref(db, `projectTransformations/${projectId}/consultantInterventions/${item.id}`), updated);
+    closeModal(); showToast('Intervensi divalidasi konsultan.'); renderProject(projectId, 'interventions');
+  });
+  modal.querySelector('#interventionForm').addEventListener('submit', async event => {
+    event.preventDefault();
+    await set(ref(db, `projectTransformations/${projectId}/consultantInterventions/${item.id}`), collect());
+    closeModal(); showToast('Intervensi disimpan.'); renderProject(projectId, 'interventions');
+  });
+}
+
 /* ---------------- Transformation knowledge base ---------------- */
 function domainSuggestions(summary, context) {
   const recommendations = context.recommendations.filter(item =>
@@ -868,9 +1056,10 @@ async function getTransformationContext(projectId, analytics) {
   const generated = recommendPlaybooks({ knowledgeBase, findings, existingStatuses: statusByCode });
   const recommendations = generated.map(item => ({ ...item, ...(stored.recommendations?.[item.playbook_code] || {}) }));
   const updates = {};
-  if (stored.schemaVersion !== '1.1') {
-    updates[`projectTransformations/${projectId}/schemaVersion`] = '1.1';
+  if (stored.schemaVersion !== '1.2') {
+    updates[`projectTransformations/${projectId}/schemaVersion`] = '1.2';
     updates[`projectTransformations/${projectId}/domainPlanVersion`] = '1.0';
+    updates[`projectTransformations/${projectId}/interventionVersion`] = '1.0';
     updates[`projectTransformations/${projectId}/knowledgeBaseVersion`] = knowledgeBase.knowledge_base_version;
     if (!stored.createdAt) updates[`projectTransformations/${projectId}/createdAt`] = now();
   }
@@ -1380,7 +1569,7 @@ async function renderProject(projectId, tab = state.currentTab || 'overview') {
         <div><div class="eyebrow">${escapeHtml(project.name || 'Asesmen')}</div><h1 class="project-title">${escapeHtml(project.pesantren)}</h1><div class="project-meta"><span>${domains.length} bidang</span><span>${Object.keys(project.perspectives || {}).length} perspektif</span><span>${escapeHtml(project.period || 'Tanpa periode')}</span></div></div>
         <div><span class="badge ${analytics.submittedCount ? 'success' : 'neutral'}">${analytics.submittedCount} jawaban masuk</span></div>
       </div>
-      <div class="tabs">${tabButton('overview','Gambaran Awal',tab)}${tabButton('perspectives','Perspektif',tab)}${tabButton('compare','Bandingkan',tab)}${tabButton('recommendations','Rekomendasi Awal',tab)}${tabButton('transformation','Transformation Plan',tab)}${tabButton('followup','Tindak Lanjut Lama',tab)}</div>
+      <div class="tabs">${tabButton('overview','Gambaran Awal',tab)}${tabButton('perspectives','Perspektif',tab)}${tabButton('compare','Bandingkan',tab)}${tabButton('recommendations','Rekomendasi Awal',tab)}${tabButton('interventions','Intervensi yang Harus Saya Lakukan',tab === 'followup' ? 'interventions' : tab)}${tabButton('transformation','Transformation Plan',tab)}</div>
       <div id="projectContent">${renderProjectTab(projectId, project, bundle, analytics, tab)}</div>
     </div></main>`);
   bindShell();
