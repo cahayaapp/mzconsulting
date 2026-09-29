@@ -45,6 +45,7 @@ const state = {
     questions: []
   }
 };
+const AUTH_TIMEOUT_MS = 15000;
 
 function now() { return Date.now(); }
 function escapeHtml(value = '') {
@@ -135,6 +136,19 @@ function iconLabel(projectName = '') {
   return words.slice(0, 2).map(w => w[0]).join('').toUpperCase() || 'MZ';
 }
 function isConsultantUser(user) { return !!user?.email && !user?.isAnonymous; }
+function withTimeout(promise, timeoutMs = AUTH_TIMEOUT_MS) {
+  let timer;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(Object.assign(new Error('Firebase request timeout'), { code: 'auth/timeout' })), timeoutMs);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+}
+function databaseAccessMessage(error) {
+  const code = String(error?.code || '').toLowerCase();
+  if (code.includes('permission')) return 'Login berhasil, tetapi akses database ditolak. Pastikan profil role dan scope tenant akun sudah benar. [database/permission-denied]';
+  if (code === 'auth/timeout') return firebaseAuthErrorMessage(error, FIREBASE_ENVIRONMENT);
+  return `Login berhasil, tetapi data dashboard tidak dapat dimuat: ${String(error?.message || 'kesalahan tidak dikenal')}`;
+}
 function environmentBadgeHtml() {
   const name = FIREBASE_ENVIRONMENT.name.toUpperCase();
   return `<span class="environment-badge ${name.toLowerCase()}" title="Firebase project: ${escapeHtml(FIREBASE_ENVIRONMENT.projectId)}">${escapeHtml(name)}</span>`;
@@ -156,6 +170,7 @@ async function loadKnowledgeBase() {
 /* ---------------- Auth ---------------- */
 onAuthStateChanged(auth, async user => {
   state.user = user;
+  state.userProfile = null;
   if (inviteFromUrl) {
     if (!user) {
       try { await signInAnonymously(auth); } catch (error) { renderFatal('Firebase Anonymous Auth belum aktif. Aktifkan di Firebase Console → Authentication → Sign-in method.'); }
@@ -170,15 +185,34 @@ onAuthStateChanged(auth, async user => {
     renderLogin();
     return;
   }
-  if (isConsultantUser(user)) await renderDashboard();
-  else renderLogin();
+  if (!isConsultantUser(user)) {
+    renderLogin();
+    return;
+  }
+  try {
+    state.userProfile = await withTimeout(safeGet(`users/${user.uid}`));
+    if (!state.userProfile) {
+      await signOut(auth);
+      renderLogin(`Akun berhasil masuk ke Firebase ${FIREBASE_ENVIRONMENT.name}, tetapi profil pengguna belum tersedia di database. Hubungi Admin. [profile/not-found]`);
+      return;
+    }
+    if (!['admin', 'consultant'].includes(state.userProfile.role)) {
+      await signOut(auth);
+      renderLogin(`Role ${state.userProfile.role || 'tidak dikenal'} tidak memiliki akses ke dashboard Admin/Consultant. [profile/role-not-allowed]`);
+      return;
+    }
+    await renderDashboard();
+  } catch (error) {
+    await signOut(auth).catch(() => {});
+    renderLogin(databaseAccessMessage(error));
+  }
 });
 
 function renderFatal(message) {
   appEl.innerHTML = `<div class="login-form-wrap"><div class="login-form"><div class="card card-pad"><div class="eyebrow">MZ Consulting</div><h2 style="margin-top:8px">Aplikasi belum siap dipakai</h2><p class="lead">${escapeHtml(message)}</p></div></div></div>`;
 }
 
-function renderLogin() {
+function renderLogin(initialError = '') {
   destroyCharts();
   appEl.innerHTML = `
     <div class="login-page">
@@ -209,7 +243,7 @@ function renderLogin() {
             <div class="form-group"><label for="email">Email</label><input class="input" type="email" id="email" autocomplete="username" required placeholder="email@contoh.com"></div>
             <div class="form-group"><label for="password">Kata sandi</label><input class="input" type="password" id="password" autocomplete="current-password" required placeholder="••••••••"></div>
             <button class="btn btn-primary btn-lg" style="width:100%" type="submit" id="loginSubmit">Masuk</button>
-            <div id="loginError" class="helper" style="margin-top:12px;color:var(--danger)"></div>
+            <div id="loginError" class="helper" style="margin-top:12px;color:var(--danger)">${escapeHtml(initialError)}</div>
           </div>
         </form>
       </section>
@@ -222,11 +256,12 @@ function renderLogin() {
     err.textContent = '';
     const submit = document.querySelector('#loginSubmit');
     setButtonLoading(submit, true, 'Memeriksa akun…');
-    try { await signInWithEmailAndPassword(auth, email, password); }
+    try { await withTimeout(signInWithEmailAndPassword(auth, email, password)); }
     catch (error) {
       err.textContent = firebaseAuthErrorMessage(error, FIREBASE_ENVIRONMENT);
-      setButtonLoading(submit, false);
       document.querySelector('#email').focus();
+    } finally {
+      setButtonLoading(submit, false);
     }
   });
 }
@@ -261,7 +296,7 @@ function bindShell() {
 }
 
 async function loadProjects() {
-  state.userProfile = await safeGet(`users/${state.user.uid}`).catch(() => null);
+  state.userProfile = state.userProfile || await safeGet(`users/${state.user.uid}`);
   if (state.userProfile?.role === 'admin') {
     state.projects = (await safeGet('projects')) || {};
   } else {

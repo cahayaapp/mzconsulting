@@ -6,7 +6,7 @@
       ".read": "auth != null && auth.token.email != null && root.child('users').child(auth.uid).child('role').val() == 'admin'",
       "$projectId": {
         ".read": "auth != null && auth.token.email != null && (root.child('users').child(auth.uid).child('role').val() == 'admin' || data.child('createdBy').val() == auth.uid || (root.child('users').child(auth.uid).child('role').val() == 'consultant' && root.child('users').child(auth.uid).child('tenantId').val() == data.child('tenantId').val()))",
-        ".write": "auth != null && auth.token.email != null && (!root.child('users').child(auth.uid).exists() || root.child('users').child(auth.uid).child('role').val() == 'admin' || data.child('createdBy').val() == auth.uid || (!data.exists() && newData.child('createdBy').val() == auth.uid) || (root.child('users').child(auth.uid).child('role').val() == 'consultant' && root.child('users').child(auth.uid).child('tenantId').val() == newData.child('tenantId').val()))"
+        ".write": "auth != null && auth.token.email != null && (root.child('users').child(auth.uid).child('role').val() == 'admin' || data.child('createdBy').val() == auth.uid || (!data.exists() && root.child('users').child(auth.uid).child('role').val() == 'consultant' && newData.child('createdBy').val() == auth.uid && root.child('users').child(auth.uid).child('tenantId').val() == newData.child('tenantId').val()) || (root.child('users').child(auth.uid).child('role').val() == 'consultant' && root.child('users').child(auth.uid).child('tenantId').val() == newData.child('tenantId').val()))"
       }
     },
     "userProjects": {
@@ -18,7 +18,7 @@
     "tenantProjects": {
       "$tenantId": {
         ".read": "auth != null && auth.token.email != null && (root.child('users').child(auth.uid).child('role').val() == 'admin' || root.child('users').child(auth.uid).child('tenantId').val() == $tenantId)",
-        ".write": "auth != null && auth.token.email != null && (!root.child('users').child(auth.uid).exists() || root.child('users').child(auth.uid).child('role').val() == 'admin' || root.child('users').child(auth.uid).child('tenantId').val() == $tenantId || auth.uid == $tenantId)"
+        ".write": "auth != null && auth.token.email != null && (root.child('users').child(auth.uid).child('role').val() == 'admin' || ((root.child('users').child(auth.uid).child('role').val() == 'consultant' || root.child('users').child(auth.uid).child('role').val() == 'coordinator') && root.child('users').child(auth.uid).child('tenantId').val() == $tenantId))"
       }
     },
     "invites": {
@@ -34,30 +34,30 @@
       }
     },
     "followups": {
-      ".read": "auth != null && auth.token.email != null && (!root.child('users').child(auth.uid).exists() || root.child('users').child(auth.uid).child('role').val() == 'admin')",
+      ".read": "auth != null && auth.token.email != null && root.child('users').child(auth.uid).child('role').val() == 'admin'",
       "$projectId": {
         ".read": "auth != null && auth.token.email != null && (root.child('users').child(auth.uid).child('role').val() == 'admin' || root.child('projects').child($projectId).child('createdBy').val() == auth.uid || (root.child('users').child(auth.uid).child('role').val() == 'consultant' && root.child('users').child(auth.uid).child('tenantId').val() == root.child('projects').child($projectId).child('tenantId').val()))",
-        ".write": "auth != null && auth.token.email != null && (!root.child('users').child(auth.uid).exists() || root.child('users').child(auth.uid).child('role').val() == 'admin' || root.child('projects').child($projectId).child('createdBy').val() == auth.uid || (root.child('users').child(auth.uid).child('role').val() == 'consultant' && root.child('users').child(auth.uid).child('tenantId').val() == root.child('projects').child($projectId).child('tenantId').val()))"
+        ".write": "auth != null && auth.token.email != null && (root.child('users').child(auth.uid).child('role').val() == 'admin' || root.child('projects').child($projectId).child('createdBy').val() == auth.uid || (root.child('users').child(auth.uid).child('role').val() == 'consultant' && root.child('users').child(auth.uid).child('tenantId').val() == root.child('projects').child($projectId).child('tenantId').val()))"
       }
     },
     "knowledgeBase": {
-      ".read": "auth != null && auth.token.email != null && (!root.child('users').child(auth.uid).exists() || root.child('users').child(auth.uid).child('role').val() == 'consultant' || root.child('users').child(auth.uid).child('role').val() == 'admin')",
-      ".write": "auth != null && auth.token.email != null && (!root.child('users').child(auth.uid).exists() || root.child('users').child(auth.uid).child('role').val() == 'admin')"
+      ".read": "auth != null && auth.token.email != null && (root.child('users').child(auth.uid).child('role').val() == 'consultant' || root.child('users').child(auth.uid).child('role').val() == 'admin')",
+      ".write": "auth != null && auth.token.email != null && root.child('users').child(auth.uid).child('role').val() == 'admin'"
     },
     "knowledgeBaseImports": {
-      ".read": "auth != null && auth.token.email != null",
-      ".write": "auth != null && auth.token.email != null && (!root.child('users').child(auth.uid).exists() || root.child('users').child(auth.uid).child('role').val() == 'admin')"
+      ".read": "auth != null && auth.token.email != null && (root.child('users').child(auth.uid).child('role').val() == 'consultant' || root.child('users').child(auth.uid).child('role').val() == 'admin')",
+      ".write": "auth != null && auth.token.email != null && root.child('users').child(auth.uid).child('role').val() == 'admin'"
     },
     "projectTransformations": {
       "$projectId": {
-        ".read": "auth != null && auth.token.email != null && (!root.child('users').child(auth.uid).exists() || root.child('users').child(auth.uid).child('role').val() == 'consultant' || root.child('users').child(auth.uid).child('role').val() == 'admin') && (!root.child('projects').child($projectId).child('tenantId').exists() || root.child('users').child(auth.uid).child('tenantId').val() == root.child('projects').child($projectId).child('tenantId').val() || root.child('projects').child($projectId).child('createdBy').val() == auth.uid)",
-        ".write": "auth != null && auth.token.email != null && (!root.child('users').child(auth.uid).exists() || root.child('users').child(auth.uid).child('role').val() == 'consultant' || root.child('users').child(auth.uid).child('role').val() == 'admin') && (!root.child('projects').child($projectId).child('tenantId').exists() || root.child('users').child(auth.uid).child('tenantId').val() == root.child('projects').child($projectId).child('tenantId').val() || root.child('projects').child($projectId).child('createdBy').val() == auth.uid)"
+        ".read": "auth != null && auth.token.email != null && (root.child('users').child(auth.uid).child('role').val() == 'admin' || (root.child('users').child(auth.uid).child('role').val() == 'consultant' && (root.child('users').child(auth.uid).child('tenantId').val() == root.child('projects').child($projectId).child('tenantId').val() || root.child('projects').child($projectId).child('createdBy').val() == auth.uid)))",
+        ".write": "auth != null && auth.token.email != null && (root.child('users').child(auth.uid).child('role').val() == 'admin' || (root.child('users').child(auth.uid).child('role').val() == 'consultant' && (root.child('users').child(auth.uid).child('tenantId').val() == root.child('projects').child($projectId).child('tenantId').val() || root.child('projects').child($projectId).child('createdBy').val() == auth.uid)))"
       }
     },
     "clientViews": {
       "$projectId": {
-        ".read": "auth != null && auth.token.email != null && ((!root.child('users').child(auth.uid).exists()) || root.child('users').child(auth.uid).child('role').val() == 'admin' || root.child('users').child(auth.uid).child('role').val() == 'consultant' || root.child('projects').child($projectId).child('clientMembers').child(auth.uid).exists())",
-        ".write": "auth != null && auth.token.email != null && (!root.child('users').child(auth.uid).exists() || root.child('users').child(auth.uid).child('role').val() == 'admin' || root.child('users').child(auth.uid).child('role').val() == 'consultant')"
+        ".read": "auth != null && auth.token.email != null && (root.child('users').child(auth.uid).child('role').val() == 'admin' || (root.child('users').child(auth.uid).child('role').val() == 'consultant' && root.child('users').child(auth.uid).child('tenantId').val() == root.child('projects').child($projectId).child('tenantId').val()) || root.child('projects').child($projectId).child('clientMembers').child(auth.uid).exists())",
+        ".write": "auth != null && auth.token.email != null && (root.child('users').child(auth.uid).child('role').val() == 'admin' || (root.child('users').child(auth.uid).child('role').val() == 'consultant' && root.child('users').child(auth.uid).child('tenantId').val() == root.child('projects').child($projectId).child('tenantId').val()))"
       }
     },
     "users": {

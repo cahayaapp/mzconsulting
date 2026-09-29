@@ -15,4 +15,8 @@ test('Firebase login failures retain their specific meaning', () => {
   assert.match(firebaseAuthErrorMessage({ code: 'auth/user-disabled' }, staging), /dinonaktifkan/);
   assert.match(firebaseAuthErrorMessage({ code: 'auth/too-many-requests' }, staging), /Terlalu banyak/);
   assert.match(firebaseAuthErrorMessage({ code: 'auth/unauthorized-domain' }, staging), /belum diizinkan/);
+  assert.match(firebaseAuthErrorMessage({ code: 'auth/user-not-found' }, staging), /tidak ditemukan/);
+  assert.match(firebaseAuthErrorMessage({ code: 'auth/wrong-password' }, staging), /salah/);
+  assert.match(firebaseAuthErrorMessage({ code: 'auth/timeout' }, staging), /batas waktu/);
+  assert.match(firebaseAuthErrorMessage({ code: 'auth/invalid-api-key' }, staging), /konfigurasi environment/);
 });

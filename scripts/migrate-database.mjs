@@ -13,7 +13,7 @@ if (!source || !fs.existsSync(source)) {
 const original = JSON.parse(fs.readFileSync(source, 'utf8'));
 const migrated = structuredClone(original);
 const addedRoots = [];
-for (const key of ['knowledgeBase', 'knowledgeBaseImports', 'projectTransformations', 'tenantProjects', 'userProjects', 'users', 'auditLogs']) {
+for (const key of ['knowledgeBase', 'knowledgeBaseImports', 'projectTransformations', 'clientViews', 'tenantProjects', 'userProjects', 'users', 'auditLogs']) {
   if (!(key in migrated)) { migrated[key] = {}; addedRoots.push(key); }
 }
 for (const [projectId, project] of Object.entries(migrated.projects || {})) {
