@@ -1,6 +1,7 @@
 import { auth, db, FIREBASE_ENVIRONMENT } from './firebase-config.js';
 import { firebaseAuthErrorMessage } from './lib/auth-errors.js';
 import { DOMAINS, SCALE_OPTIONS, getStage, getQuestion, getDomain } from './questions.js';
+import { ACTIVE_INSTRUMENT_VERSION, answerFromOption, answerSignal, createVersionedInvite, createVersionedProject, effectiveInstrumentVersion, getAllQuestionDefinitions, getQuestionDefinition, renderAnswerOptions } from './lib/instrument.js';
 import {
   buildFindings,
   buildRoadmap,
@@ -73,6 +74,19 @@ function formatDate(ms) {
 function avg(values) {
   const clean = values.filter(v => Number.isFinite(Number(v))).map(Number);
   return clean.length ? clean.reduce((a, b) => a + b, 0) / clean.length : null;
+}
+function cumulativeGate(values) {
+  const clean = values.filter(v => Number.isFinite(Number(v))).map(Number);
+  if (!clean.length) return null;
+  // Sebuah gate tercapai bila sedikitnya 70% sinyal memenuhi gate tersebut.
+  for (let gate = 5; gate >= 1; gate--) if (clean.filter(value => value >= gate).length / clean.length >= .7) return gate;
+  return 1;
+}
+function median(values) {
+  const clean = values.filter(v => Number.isFinite(Number(v))).map(Number).sort((a,b) => a-b);
+  if (!clean.length) return null;
+  const middle = Math.floor(clean.length / 2);
+  return clean.length % 2 ? clean[middle] : (clean[middle - 1] + clean[middle]) / 2;
 }
 function scoreText(value) { return value == null ? '—' : Number(value).toFixed(2); }
 function randomToken(bytes = 18) {
@@ -438,7 +452,7 @@ function openNewProjectModal() {
     if (!domains.length) return showToast('Pilih minimal satu bidang asesmen.', 'error');
     const projectRef = push(ref(db, 'projects'));
     const tenantId = state.userProfile?.tenantId || state.user.uid;
-    const project = {
+    const project = createVersionedProject({
       name: modal.querySelector('#assessmentName').value.trim(),
       pesantren: modal.querySelector('#pesantren').value.trim(),
       period: modal.querySelector('#period').value.trim(),
@@ -449,7 +463,7 @@ function openNewProjectModal() {
       members: { [state.user.uid]: { role: 'consultant', addedAt: now() } },
       engagementStatus: 'Belum dibahas',
       analysisNote: ''
-    };
+    });
     const submit = event.submitter;
     setButtonLoading(submit, true, 'Membuat…');
     try {
@@ -488,12 +502,12 @@ function calculateAnalytics(project, bundle) {
     perspectiveScores[p.id] = { overall: null, domains: {}, questions: {}, label: p.label, name: response?.respondentName || p.respondentName || '' };
     const allDomainScores = [];
     for (const domain of domains) {
-      const scores = domain.questions.map(q => response?.answers?.[q.id]?.score).filter(v => Number.isFinite(Number(v))).map(Number);
+      const scores = domain.questions.map(q => answerSignal(response?.answers?.[q.id])).filter(v => v != null);
       domain.questions.forEach(q => {
-        const val = response?.answers?.[q.id]?.score;
-        if (Number.isFinite(Number(val))) perspectiveScores[p.id].questions[q.id] = Number(val);
+        const val = answerSignal(response?.answers?.[q.id]);
+        if (val != null) perspectiveScores[p.id].questions[q.id] = val;
       });
-      const domainAvg = avg(scores);
+      const domainAvg = response?.instrumentVersion === ACTIVE_INSTRUMENT_VERSION ? cumulativeGate(scores) : avg(scores);
       perspectiveScores[p.id].domains[domain.id] = domainAvg;
       if (domainAvg != null) allDomainScores.push(domainAvg);
     }
@@ -504,10 +518,10 @@ function calculateAnalytics(project, bundle) {
   const domainGaps = {};
   domains.forEach(domain => {
     const values = Object.values(perspectiveScores).map(p => p.domains[domain.id]).filter(v => v != null);
-    domainAggregate[domain.id] = avg(values);
+    domainAggregate[domain.id] = cumulativeGate(values);
     domainGaps[domain.id] = values.length >= 2 ? Math.max(...values) - Math.min(...values) : 0;
   });
-  const overall = avg(Object.values(domainAggregate));
+  const overall = cumulativeGate(Object.values(domainAggregate));
 
   const questionStats = [];
   domains.forEach(domain => domain.questions.forEach(question => {
@@ -517,6 +531,7 @@ function calculateAnalytics(project, bundle) {
         questionId: question.id,
         domainId: domain.id,
         average: avg(values),
+        gate: median(values),
         spread: values.length >= 2 ? Math.max(...values) - Math.min(...values) : 0,
         count: values.length
       });
@@ -532,7 +547,7 @@ function calculateAnalytics(project, bundle) {
     overall,
     questionStats,
     widestGaps: questionStats.filter(q => q.count >= 2).sort((a,b) => b.spread - a.spread).slice(0, 8),
-    weakestQuestions: questionStats.slice().sort((a,b) => a.average - b.average)
+    weakestQuestions: questionStats.slice().sort((a,b) => (a.gate ?? a.average) - (b.gate ?? b.average))
   };
 }
 
@@ -741,8 +756,8 @@ function openPerspectiveModal(projectId, project) {
     const inviteId = randomToken();
     const label = modal.querySelector('#perspectiveLabel').value.trim();
     const name = modal.querySelector('#perspectiveName').value.trim();
-    const perspective = { label, name, inviteId, createdAt: now() };
-    const invite = { projectId, perspectiveId: perspectiveRef.key, perspectiveLabel: label, respondentName: name, pesantren: project.pesantren, assessmentName: project.name, period: project.period || '', domains: project.domains, active: true, createdAt: now() };
+    const perspective = { label, name, inviteId, instrumentVersion: ACTIVE_INSTRUMENT_VERSION, createdAt: now() };
+    const invite = createVersionedInvite({ projectId, perspectiveId: perspectiveRef.key, perspectiveLabel: label, respondentName: name, pesantren: project.pesantren, assessmentName: project.name, period: project.period || '', domains: project.domains, active: true, createdAt: now() });
     const updates = {};
     updates[`projects/${projectId}/perspectives/${perspectiveRef.key}`] = perspective;
     updates[`invites/${inviteId}`] = invite;
@@ -1062,9 +1077,10 @@ async function openClientPreview(projectId, project) {
 async function renderKnowledgeBaseAdmin() {
   destroyCharts();
   const kb = await loadKnowledgeBase();
-  appEl.innerHTML = consultantShell(`<main class="page"><div class="container"><button class="breadcrumb" id="backDashboard" style="border:0;background:none;padding:0">← Kembali ke dashboard</button><div class="page-head"><div><div class="eyebrow">Internal · Knowledge Base v${escapeHtml(kb.knowledge_base_version)}</div><h1>Transformation Playbooks</h1><p class="lead">${kb.playbooks.length} playbook, ${kb.toolkits.length} toolkit, dan ${kb.indicator_map.length} mapping indikator. Seed aktif dibaca dari artefak tervalidasi.</p></div><button class="btn btn-primary" id="publishKbBtn">Publikasikan v${escapeHtml(kb.knowledge_base_version)} ke database</button></div><div class="filter-bar"><select class="select" id="kbDomainFilter"><option value="">Semua domain</option>${kb.domains.map(domain => `<option value="${domain.code}">${domain.code} · ${escapeHtml(domain.name)}</option>`).join('')}</select><input class="input" id="kbSearch" placeholder="Cari kode atau judul playbook…"></div><div class="grid grid-3" id="kbGrid">${kb.playbooks.map(kbCardHtml).join('')}</div></div></main>`);
+  appEl.innerHTML = consultantShell(`<main class="page"><div class="container"><button class="breadcrumb" id="backDashboard" style="border:0;background:none;padding:0">← Kembali ke dashboard</button><div class="page-head"><div><div class="eyebrow">Internal · Knowledge Base v${escapeHtml(kb.knowledge_base_version)}</div><h1>Transformation Playbooks</h1><p class="lead">${kb.playbooks.length} playbook, ${kb.toolkits.length} toolkit, dan ${kb.indicator_map.length} mapping indikator. Seed aktif dibaca dari artefak tervalidasi.</p></div><div class="page-actions"><button class="btn btn-secondary" id="instrumentPreviewBtn">Preview Instrumen ${ACTIVE_INSTRUMENT_VERSION}</button><button class="btn btn-primary" id="publishKbBtn">Publikasikan v${escapeHtml(kb.knowledge_base_version)} ke database</button></div></div><div class="filter-bar"><select class="select" id="kbDomainFilter"><option value="">Semua domain</option>${kb.domains.map(domain => `<option value="${domain.code}">${domain.code} · ${escapeHtml(domain.name)}</option>`).join('')}</select><input class="input" id="kbSearch" placeholder="Cari kode atau judul playbook…"></div><div class="grid grid-3" id="kbGrid">${kb.playbooks.map(kbCardHtml).join('')}</div></div></main>`);
   bindShell();
   document.querySelector('#backDashboard').addEventListener('click', renderDashboard);
+  document.querySelector('#instrumentPreviewBtn').addEventListener('click', renderInstrumentPreview);
   const filter = () => {
     const domain = document.querySelector('#kbDomainFilter').value;
     const query = document.querySelector('#kbSearch').value.toLowerCase();
@@ -1083,6 +1099,22 @@ async function renderKnowledgeBaseAdmin() {
     } catch (error) { console.error(error); showToast('Knowledge base belum berhasil dipublikasikan.', 'error'); }
     finally { setButtonLoading(button, false); }
   });
+}
+
+function renderInstrumentPreview() {
+  destroyCharts();
+  const definitions = getAllQuestionDefinitions();
+  const card = item => `<article class="card instrument-card" data-instrument-card data-domain="${item.domain_id}"><div class="solution-top"><span class="badge">${escapeHtml(item.indicator_id)}</span><span class="small muted">${escapeHtml(item.answer_type)} · ${escapeHtml(item.role)}</span></div><h3>${escapeHtml(item.question_text)}</h3><p class="small muted"><strong>Construct:</strong> ${escapeHtml(item.construct)} · <strong>Version:</strong> ${escapeHtml(item.instrument_version)}</p><div class="instrument-options">${item.answer_options.map(option => `<div class="instrument-option ${option.excluded_from_score ? 'special' : ''}"><div><strong>${escapeHtml(option.label)}</strong><span>${escapeHtml(option.description)}</span></div><code>${option.excluded_from_score ? escapeHtml(option.code) : `gate ${option.gate_signal ?? '—'} · signal ${option.diagnostic_signal ?? '—'}`}</code></div>`).join('')}</div></article>`;
+  appEl.innerHTML = consultantShell(`<main class="page"><div class="container"><button class="breadcrumb" id="backKnowledgeBase" style="border:0;background:none;padding:0">← Kembali ke Knowledge Base</button><div class="page-head"><div><div class="eyebrow">Internal · Instrument Admin</div><h1>Preview Instrumen ${ACTIVE_INSTRUMENT_VERSION}</h1><p class="lead">${definitions.length} pertanyaan aktif. Mapping internal hanya terlihat oleh Admin dan Consultant.</p></div></div><div class="filter-bar"><select class="select" id="instrumentDomainFilter"><option value="">Semua domain</option>${DOMAINS.map(domain => `<option value="${domain.id}">${domain.code} · ${escapeHtml(domain.title)}</option>`).join('')}</select><input class="input" id="instrumentSearch" placeholder="Cari pertanyaan, construct, atau indikator…"></div><div class="instrument-grid">${definitions.map(card).join('')}</div></div></main>`);
+  bindShell();
+  document.querySelector('#backKnowledgeBase').addEventListener('click', renderKnowledgeBaseAdmin);
+  const filter = () => {
+    const domain = document.querySelector('#instrumentDomainFilter').value;
+    const query = document.querySelector('#instrumentSearch').value.toLowerCase();
+    document.querySelectorAll('[data-instrument-card]').forEach(cardEl => cardEl.classList.toggle('hidden', Boolean(domain && cardEl.dataset.domain !== domain || query && !cardEl.textContent.toLowerCase().includes(query))));
+  };
+  document.querySelector('#instrumentDomainFilter').addEventListener('change', filter);
+  document.querySelector('#instrumentSearch').addEventListener('input', filter);
 }
 
 function kbCardHtml(playbook) {
@@ -1113,6 +1145,7 @@ async function renderRespondentApp() {
     if (!invite || invite.active === false) return renderFatal('Tautan asesmen tidak ditemukan atau sudah dinonaktifkan.');
     state.respondent.invite = invite;
     const response = (await safeGet(`responses/${inviteId}`)) || { answers: {}, respondentName: invite.respondentName || '', startedAt: now(), updatedAt: now() };
+    response.instrumentVersion = effectiveInstrumentVersion({ invite, response });
     state.respondent.response = response;
     const domainIds = Array.isArray(invite.domains) ? invite.domains : Object.keys(invite.domains || {}).filter(k => invite.domains[k]);
     state.respondent.questions = DOMAINS.filter(d => domainIds.includes(d.id)).flatMap(domain => domain.questions.map(q => ({ ...q, domainId: domain.id, domainTitle: domain.title, domainCode: domain.code })));
@@ -1130,6 +1163,8 @@ function renderRespondentQuestion() {
   const question = questions[index];
   if (!question) return renderFatal('Tidak ada pertanyaan pada tautan ini.');
   const answer = response.answers?.[question.id];
+  const instrumentVersion = effectiveInstrumentVersion({ invite, response });
+  const definition = getQuestionDefinition(question.id, instrumentVersion);
   const progress = Math.round((Object.keys(response.answers || {}).length / questions.length) * 100);
   const isLast = index === questions.length - 1;
   const answeredCount = Object.keys(response.answers || {}).length;
@@ -1145,10 +1180,10 @@ function renderRespondentQuestion() {
             <span class="badge neutral">${question.domainCode} · ${escapeHtml(question.domainTitle)}</span>
             <div class="question-no">Pertanyaan ${index + 1} dari ${questions.length}</div>
             <div class="question-text">${escapeHtml(question.text)}</div>
-            <div class="answer-list">${SCALE_OPTIONS.map(option => {
+            ${definition ? renderAnswerOptions(definition, answer, escapeHtml) : `<div class="answer-list">${SCALE_OPTIONS.map(option => {
               const selected = answer && ((option.value === null && answer.unsure) || answer.score === option.value);
               return `<button class="answer-btn ${selected ? 'selected' : ''}" data-answer="${option.value === null ? 'unsure' : option.value}"><span class="answer-num">${option.value === null ? '?' : option.value}</span><span>${escapeHtml(option.label)}</span></button>`;
-            }).join('')}</div>
+            }).join('')}</div>`}
             <div class="question-note"><label for="answerNote">Catatan singkat <span class="muted" style="font-weight:500">(opsional)</span></label><textarea class="textarea" id="answerNote" placeholder="Contoh, kondisi, atau penjelasan yang ingin ditambahkan…">${escapeHtml(answer?.note || '')}</textarea></div>
           </div>
           <div class="respondent-nav"><button class="btn btn-ghost" id="prevQ" ${index === 0 ? 'disabled' : ''}>← Sebelumnya</button>${isLast ? `<button class="btn btn-primary" id="submitAssessment">Kirim jawaban</button>` : `<button class="btn btn-primary" id="nextQ">Berikutnya →</button>`}</div>
@@ -1157,6 +1192,15 @@ function renderRespondentQuestion() {
     </div>`;
 
   document.querySelector('#respondentName').addEventListener('change', async event => { response.respondentName = event.target.value.trim(); await saveRespondentResponse(); });
+  document.querySelectorAll('[data-answer-option]').forEach(btn => btn.addEventListener('click', async () => {
+    const mapped = answerFromOption(question.id, btn.dataset.answerOption);
+    if (!mapped) return;
+    response.answers = response.answers || {};
+    response.instrumentVersion = ACTIVE_INSTRUMENT_VERSION;
+    response.answers[question.id] = { ...mapped, note: document.querySelector('#answerNote').value.trim(), updatedAt: now() };
+    await saveRespondentResponse();
+    renderRespondentQuestion();
+  }));
   document.querySelectorAll('[data-answer]').forEach(btn => btn.addEventListener('click', async () => {
     const raw = btn.dataset.answer;
     response.answers = response.answers || {};
