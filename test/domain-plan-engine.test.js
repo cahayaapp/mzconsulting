@@ -30,6 +30,8 @@ const summary = buildDomainSummary({ domain, domainIndex: 1, perspectiveScores, 
 const requirements = buildNextLevelRequirements({ domain, summary, questionValues, getDefinition: getQuestionDefinition });
 
 test('domain average min max use relevant submitted perspectives', () => {
+  assert.equal(summary.domainCode, 'D02');
+  assert.notEqual(summary.domainCode, domain.code);
   assert.equal(summary.average, 3);
   assert.equal(summary.min, 2);
   assert.equal(summary.max, 4);
