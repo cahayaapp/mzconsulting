@@ -6,6 +6,7 @@ import {
   additiveInterventionMigration,
   buildKnowledgeInterventions,
   clientSafeInterventionProjection,
+  diagnosisMaturityPosition,
   domainMaturityDescription,
   maturityMarkerPosition,
   resolveMaturityPosition,
@@ -29,6 +30,13 @@ test('average 2.4 remains an average and never becomes Level 2.4', () => {
   assert.equal(position.averagePerspective, 2.4);
   assert.equal(position.displayLevel, 2);
   assert.equal(position.verifiedMaturity, null);
+});
+
+test('diagnosis level and next stage consistently follow the perspective average', () => {
+  const position = diagnosisMaturityPosition(2.17);
+  assert.equal(position.displayLevel, 2);
+  assert.equal(position.markerValue, 2.17);
+  assert.equal(position.targetLevel, 3);
 });
 
 test('validated maturity is distinct from average perspective', () => {

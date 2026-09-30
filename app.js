@@ -3,7 +3,7 @@ import { firebaseAuthErrorMessage } from './lib/auth-errors.js';
 import { DOMAINS, SCALE_OPTIONS, getStage, getQuestion, getDomain } from './questions.js';
 import { ACTIVE_INSTRUMENT_VERSION, answerFromOption, answerSignal, createVersionedInvite, createVersionedProject, effectiveInstrumentVersion, getAllQuestionDefinitions, getQuestionDefinition, renderAnswerOptions } from './lib/instrument.js';
 import { DOMAIN_PLAN_STATUSES, MATURITY_LABELS, addOrMergeDomainPlan, buildDomainPlanSnapshot, buildDomainSummary, buildNextLevelRequirements, progressOf, verifyDomainPlan } from './lib/domain-plan-engine.js';
-import { INTERVENTION_STATUSES, MATURITY_JOURNEY, buildKnowledgeInterventions, currentConditionNarrative, domainMaturityDescription, maturityMarkerPosition, mergeInterventionQueue, resolveMaturityPosition, validateIntervention } from './lib/consultant-intervention-engine.js';
+import { INTERVENTION_STATUSES, MATURITY_JOURNEY, buildKnowledgeInterventions, currentConditionNarrative, diagnosisMaturityPosition, domainMaturityDescription, maturityMarkerPosition, mergeInterventionQueue, validateIntervention } from './lib/consultant-intervention-engine.js';
 import {
   buildFindings,
   buildRoadmap,
@@ -600,16 +600,15 @@ function maturityJourneyHtml(position, domainCode) {
   return `<div class="maturity-journey" aria-label="Perjalanan maturity 5 tingkat">
     <div class="maturity-track" aria-hidden="true"></div>
     ${averageMarker != null ? `<span class="average-position-marker" style="left:${averageMarker}%" title="Average Perspektif ${scoreText(position.averagePerspective)}"></span>` : ''}
-    <div class="current-position-marker" style="left:${marker}%;--marker:${marker}"><span class="current-marker-dot" aria-hidden="true">◆</span><strong>Posisi Saat Ini</strong></div>
+    <div class="current-position-marker" style="left:${marker}%;--marker:${marker}"><strong>Posisi Saat Ini</strong></div>
     <div class="maturity-points">${MATURITY_JOURNEY.map(stage => `<button type="button" class="maturity-point ${stage.level === position.displayLevel ? 'active' : stage.level < position.markerValue ? 'reached' : ''}" data-maturity-point="${domainCode}:${stage.level}" aria-label="Level ${stage.level} — ${escapeHtml(stage.label)}: ${escapeHtml(stage.description)}"><span>${stage.level}</span><small>${escapeHtml(stage.label)}</small></button>`).join('')}</div>
   </div>`;
 }
 
 function domainMaturityCardHtml({ domain, summary, context, analytics }) {
   const domainCode = summary.domainCode;
-  const domainPlan = context.stored.domainPlans?.[domainCode] || {};
-  const validatedMaturity = domainPlan.verifiedMaturity || (domainPlan.status === 'Terverifikasi' ? domainPlan.targetMaturity : null);
-  const position = resolveMaturityPosition({ average: summary.average, validatedMaturity });
+  const position = diagnosisMaturityPosition(summary.average);
+  const displaySummary = { ...summary, currentMaturity: position.displayLevel, targetMaturity: position.targetLevel };
   const playbooks = context.knowledgeBase.playbooks.filter(item => item.domain_code === domainCode && item.active !== false);
   const maturityCopy = domainMaturityDescription(playbooks, position.displayLevel || 1);
   const stats = analytics.questionStats.filter(item => item.domainId === domain.id).sort((a, b) => a.average - b.average);
@@ -617,15 +616,14 @@ function domainMaturityCardHtml({ domain, summary, context, analytics }) {
   const strongest = stats.at(-1) ? getQuestion(stats.at(-1).questionId)?.text : '';
   const relevantRecommendations = context.recommendations.filter(item => context.knowledgeBase.playbooks.find(playbook => playbook.id === item.playbook_id)?.domain_code === domainCode);
   const confidence = relevantRecommendations.some(item => item.evidence_warning) ? 'Low' : 'Normal';
-  const narrative = currentConditionNarrative({ summary, domainName: domain.title, strongestIndicator: strongest, weakestIndicator: weakest, perceptionGap: analytics.domainGaps[domain.id], evidenceConfidence: confidence, validatedMaturity });
-  const requirements = buildNextLevelRequirements({ domain, summary, questionValues: analytics.questionValues, getDefinition: getQuestionDefinition });
+  const narrative = currentConditionNarrative({ summary, domainName: domain.title, strongestIndicator: strongest, weakestIndicator: weakest, perceptionGap: analytics.domainGaps[domain.id], evidenceConfidence: confidence });
+  const requirements = buildNextLevelRequirements({ domain, summary: displaySummary, questionValues: analytics.questionValues, getDefinition: getQuestionDefinition });
   const missing = requirements.filter(item => !item.completed).length;
-  const next = summary.targetMaturity ? MATURITY_JOURNEY[summary.targetMaturity - 1] : null;
+  const next = displaySummary.targetMaturity ? MATURITY_JOURNEY[displaySummary.targetMaturity - 1] : null;
   return `<article class="card maturity-domain-card">
     <div class="maturity-domain-head"><div class="domain-identity"><span class="domain-visual-icon" aria-hidden="true">${domainVisualIcon(domainCode)}</span><div><span class="domain-sequence">${domainCode}</span><h3>${escapeHtml(domain.title)}</h3></div></div><div class="maturity-summary"><strong>${scoreText(summary.average)}</strong><span>Average Perspektif</span></div></div>
-    <div class="maturity-stat-strip"><span><small>Terendah</small><strong>${scoreText(summary.min)}</strong></span><span><small>Tertinggi</small><strong>${scoreText(summary.max)}</strong></span><span><small>Perspektif</small><strong>${summary.respondentCount}</strong></span><span><small>Maturity</small><strong>Level ${position.displayLevel || '—'}</strong></span></div>
+    <div class="maturity-stat-strip"><span><small>Terendah</small><strong>${scoreText(summary.min)}</strong></span><span><small>Tertinggi</small><strong>${scoreText(summary.max)}</strong></span><span><small>Perspektif</small><strong>${summary.respondentCount}</strong></span><span><small>Level Saat Ini</small><strong>Level ${position.displayLevel || '—'}</strong></span></div>
     ${maturityJourneyHtml(position, domainCode)}
-    <div class="position-verification-label"><span aria-hidden="true">◎</span> ${escapeHtml(position.label)}${position.verifiedMaturity ? ` · Level ${position.verifiedMaturity}` : ''}</div>
     <section class="current-condition"><div class="eyebrow">Kondisi Saat Ini</div><p>${escapeHtml(narrative)}</p><small>${escapeHtml(maturityCopy.description)} <span class="source-tag">${escapeHtml(maturityCopy.source)}</span></small></section>
     <div class="next-stage-summary"><div><small>Tahap berikutnya</small><strong>${next ? `Level ${next.level} — ${escapeHtml(next.label)}` : 'Tahap tertinggi / perlu verifikasi'}</strong></div><p>${next ? `Untuk mencapai tahap berikutnya, terdapat ${missing} requirement yang masih perlu dipenuhi.` : 'Tidak ada kenaikan level otomatis. Kondisi tetap perlu diverifikasi konsultan.'}</p></div>
     <button class="btn btn-secondary btn-sm" data-open-domain-recommendation="${domainCode}">Lihat Detail</button>
@@ -642,8 +640,7 @@ async function renderMaturityOverview(projectId, project, analytics) {
     const buckets = Object.fromEntries(MATURITY_JOURNEY.map(stage => [stage.level, 0]));
     domains.forEach(domain => {
       const summary = analytics.domainSummaries.find(item => item.domainId === domain.id);
-      const plan = context.stored.domainPlans?.[summary?.domainCode] || {};
-      const level = resolveMaturityPosition({ average: summary.average, validatedMaturity: plan.verifiedMaturity || (plan.status === 'Terverifikasi' ? plan.targetMaturity : null) }).displayLevel;
+      const level = diagnosisMaturityPosition(summary.average).displayLevel;
       if (level) buckets[level] += 1;
     });
     const safety = context.recommendations.filter(item => item.safety_override);
@@ -1063,20 +1060,20 @@ async function openDomainRecommendationModal(projectId, project, analytics, doma
   if (!summary || !domain) return;
   const context = await getTransformationContext(projectId, analytics);
   const latestStored = (await safeGet(`projectTransformations/${projectId}`)) || context.stored;
-  const requirements = buildNextLevelRequirements({ domain, summary, questionValues: analytics.questionValues, getDefinition: getQuestionDefinition });
-  const progress = progressOf(requirements);
   const suggestions = domainSuggestions(summary, context);
   const existing = latestStored.domainPlans?.[domainCode];
-  const validatedMaturity = existing?.verifiedMaturity || (existing?.status === 'Terverifikasi' ? existing.targetMaturity : null);
-  const position = resolveMaturityPosition({ average: summary.average, validatedMaturity });
-  const stage = MATURITY_JOURNEY[(position.displayLevel || summary.currentMaturity || 1) - 1];
-  const targetStage = summary.targetMaturity ? MATURITY_JOURNEY[summary.targetMaturity - 1] : null;
+  const position = diagnosisMaturityPosition(summary.average);
+  const displaySummary = { ...summary, currentMaturity: position.displayLevel, targetMaturity: position.targetLevel };
+  const requirements = buildNextLevelRequirements({ domain, summary: displaySummary, questionValues: analytics.questionValues, getDefinition: getQuestionDefinition });
+  const progress = progressOf(requirements);
+  const stage = MATURITY_JOURNEY[(position.displayLevel || 1) - 1];
+  const targetStage = displaySummary.targetMaturity ? MATURITY_JOURNEY[displaySummary.targetMaturity - 1] : null;
   const stats = analytics.questionStats.filter(item => item.domainId === domain.id).sort((a, b) => a.average - b.average);
   const weakest = stats[0] ? getQuestion(stats[0].questionId)?.text : '';
   const strongest = stats.at(-1) ? getQuestion(stats.at(-1).questionId)?.text : '';
   const relatedRecommendations = context.recommendations.filter(item => context.knowledgeBase.playbooks.find(playbook => playbook.id === item.playbook_id)?.domain_code === domainCode);
   const confidence = relatedRecommendations.some(item => item.evidence_warning) ? 'Low' : 'Normal';
-  const conditionNarrative = currentConditionNarrative({ summary, domainName: domain.title, strongestIndicator: strongest, weakestIndicator: weakest, perceptionGap: analytics.domainGaps[domain.id], evidenceConfidence: confidence, validatedMaturity });
+  const conditionNarrative = currentConditionNarrative({ summary, domainName: domain.title, strongestIndicator: strongest, weakestIndicator: weakest, perceptionGap: analytics.domainGaps[domain.id], evidenceConfidence: confidence });
   const linkedPlaybooks = suggestions.playbooks.map(refItem => context.knowledgeBase.playbooks.find(item => item.code === refItem.code)).filter(Boolean);
   const primaryPlaybook = linkedPlaybooks[0];
   const interventionSteps = linkedPlaybooks.flatMap(playbook => toArray(playbook.intervention_steps).map(step => ({ ...step, playbookCode: playbook.code }))).slice(0, 8);
@@ -1088,11 +1085,11 @@ async function openDomainRecommendationModal(projectId, project, analytics, doma
   modal.className = 'modal-backdrop';
   modal.innerHTML = `<div class="modal diagnosis-report-modal" role="dialog" aria-modal="true" aria-labelledby="domainRecommendationTitle"><div class="modal-head diagnosis-report-head"><div class="diagnosis-domain-title"><span class="diagnosis-domain-icon" aria-hidden="true">${domainVisualIcon(domainCode)}</span><div><div class="eyebrow">${domainCode} · Hasil Diagnosis dan Arah Perbaikan</div><h2 id="domainRecommendationTitle">${escapeHtml(summary.domainName)}</h2><p>${escapeHtml(primaryPlaybook?.description || 'Ringkasan kondisi bidang berdasarkan seluruh perspektif yang sudah masuk.')}</p></div></div><div class="diagnosis-head-actions"><button type="button" class="btn btn-secondary btn-sm" id="downloadDiagnosisPdf">↓ Download PDF</button><button type="button" class="icon-btn" data-close aria-label="Tutup dialog">×</button></div></div><form id="domainRecommendationForm"><div class="modal-body diagnosis-report-body">
     ${existing ? '<div class="notice warn">Bidang ini sudah ada di Transformation Plan. Menyimpan kembali akan menggabungkan analisis terbaru dengan data implementasi yang sudah ada.</div>' : ''}
-    <section class="diagnosis-stat-section"><div class="section-label">Ringkasan Hasil Audit</div><div class="diagnosis-stat-grid"><article><span class="stat-symbol blue">▥</span><small>Nilai Rata-rata</small><strong>${scoreText(summary.average)}</strong></article><article><span class="stat-symbol red">↓</span><small>Nilai Terendah</small><strong>${scoreText(summary.min)}</strong></article><article><span class="stat-symbol green">↑</span><small>Nilai Tertinggi</small><strong>${scoreText(summary.max)}</strong></article><article><span class="stat-symbol blue">♙</span><small>Jumlah Perspektif</small><strong>${summary.respondentCount}</strong></article><article><span class="stat-symbol gold">▤</span><small>Posisi ${validatedMaturity ? 'Terverifikasi' : 'Perspektif'}</small><strong>Level ${position.displayLevel || '—'}</strong><b>${escapeHtml(stage?.label || 'Belum ditentukan')}</b></article><aside><span aria-hidden="true">ⓘ</span><p>Angka ${scoreText(summary.average)} adalah rata-rata hasil asesmen dari seluruh perspektif yang masuk. Level kematangan ditetapkan setelah hasil ditelaah dan diverifikasi konsultan.</p></aside></div></section>
+    <section class="diagnosis-stat-section"><div class="section-label">Ringkasan Hasil Audit</div><div class="diagnosis-stat-grid"><article><span class="stat-symbol blue">▥</span><small>Nilai Rata-rata</small><strong>${scoreText(summary.average)}</strong></article><article><span class="stat-symbol red">↓</span><small>Nilai Terendah</small><strong>${scoreText(summary.min)}</strong></article><article><span class="stat-symbol green">↑</span><small>Nilai Tertinggi</small><strong>${scoreText(summary.max)}</strong></article><article><span class="stat-symbol blue">♙</span><small>Jumlah Perspektif</small><strong>${summary.respondentCount}</strong></article><article><span class="stat-symbol gold">▤</span><small>Level Saat Ini</small><strong>Level ${position.displayLevel || '—'}</strong><b>${escapeHtml(stage?.label || 'Belum ditentukan')}</b></article><aside><span aria-hidden="true">ⓘ</span><p>Angka ${scoreText(summary.average)} adalah rata-rata seluruh perspektif yang masuk. Level saat ini mengikuti rentang nilai rata-rata tersebut; marker tetap menunjukkan posisi desimalnya pada garis perjalanan.</p></aside></div></section>
     <section class="diagnosis-journey-panel"><h3>Tingkat Kematangan</h3>${maturityJourneyHtml(position, domainCode)}</section>
     <div class="diagnosis-two-column"><section class="diagnosis-panel current"><h3><span>▤</span>Kondisi Saat Ini <b>Level ${position.displayLevel || '—'} — ${escapeHtml(stage?.label || 'Belum ditentukan')}</b></h3><p>${escapeHtml(conditionNarrative)}</p><p>${escapeHtml(stage?.description || '')}</p></section><section class="diagnosis-panel foundation"><h3><span>⌁</span>Fondasi yang Sudah Dimiliki</h3><p>${escapeHtml(foundationText)}</p></section></div>
     <section class="diagnosis-improvement-panel"><div class="diagnosis-section-head"><h3><span>▲</span>Area yang Masih Perlu Diperbaiki</h3><p>Terdapat ${requirements.filter(item => !item.completed).length} area utama yang perlu menjadi perhatian.</p></div>${requirements.filter(item => !item.completed).length ? `<ol class="improvement-grid">${requirements.filter(item => !item.completed).map(item => `<li><span>${escapeHtml(item.title)}</span><small>${escapeHtml(item.condition)}</small></li>`).join('')}</ol>` : '<p class="muted">Semua requirement target sudah didukung. Evidence dan efektivitas tetap perlu diverifikasi.</p>'}</section>
-    <div class="diagnosis-direction-grid"><section class="diagnosis-panel target"><h3><span>▥</span>Target Perbaikan Berikutnya</h3><div class="level-shift">Level ${summary.currentMaturity || '—'} → Level ${summary.targetMaturity || '—'}</div><h4>${escapeHtml(targetStage?.label || 'Tahap berikutnya belum ditentukan')}</h4><p>${escapeHtml(domainMaturityDescription(linkedPlaybooks, summary.targetMaturity || position.displayLevel || 1).description)}</p><div class="readiness-summary"><strong>${progress.completed} dari ${progress.total}</strong><span>requirement menuju level berikutnya telah terpenuhi</span></div></section><section class="diagnosis-panel intervention"><h3><span>⚒</span>Intervensi yang Direkomendasikan</h3><p>${escapeHtml(primaryPlaybook?.purpose || 'Konsultan perlu memvalidasi langkah intervensi berdasarkan temuan dan bukti yang tersedia.')}</p>${interventionSteps.length ? `<ol class="intervention-step-preview">${interventionSteps.map(step => `<li><strong>${escapeHtml(step.step || step.title || 'Langkah intervensi')}</strong><span>${escapeHtml(step.activity || step.description || '')}</span>${step.output ? `<small>Output: ${escapeHtml(step.output)}</small>` : ''}</li>`).join('')}</ol>` : '<p class="muted">Belum ada tahapan intervensi yang sesuai.</p>'}</section><section class="diagnosis-panel outcome"><h3><span>◎</span>Hasil yang Diharapkan</h3><p>${escapeHtml(expectedOutcome)}</p>${primaryPlaybook?.effectiveness_criteria ? `<div class="expected-evidence"><strong>Bukti efektivitas</strong><span>${escapeHtml(primaryPlaybook.effectiveness_criteria)}</span></div>` : ''}</section></div>
+    <div class="diagnosis-direction-grid"><section class="diagnosis-panel target"><h3><span>▥</span>Target Perbaikan Berikutnya</h3><div class="level-shift">Level ${displaySummary.currentMaturity || '—'} → Level ${displaySummary.targetMaturity || '—'}</div><h4>${escapeHtml(targetStage?.label || 'Tahap berikutnya belum ditentukan')}</h4><p>${escapeHtml(domainMaturityDescription(linkedPlaybooks, displaySummary.targetMaturity || position.displayLevel || 1).description)}</p><div class="readiness-summary"><strong>${progress.completed} dari ${progress.total}</strong><span>requirement menuju level berikutnya telah terpenuhi</span></div></section><section class="diagnosis-panel intervention"><h3><span>⚒</span>Intervensi yang Direkomendasikan</h3><p>${escapeHtml(primaryPlaybook?.purpose || 'Konsultan perlu memvalidasi langkah intervensi berdasarkan temuan dan bukti yang tersedia.')}</p>${interventionSteps.length ? `<ol class="intervention-step-preview">${interventionSteps.map(step => `<li><strong>${escapeHtml(step.step || step.title || 'Langkah intervensi')}</strong><span>${escapeHtml(step.activity || step.description || '')}</span>${step.output ? `<small>Output: ${escapeHtml(step.output)}</small>` : ''}</li>`).join('')}</ol>` : '<p class="muted">Belum ada tahapan intervensi yang sesuai.</p>'}</section><section class="diagnosis-panel outcome"><h3><span>◎</span>Hasil yang Diharapkan</h3><p>${escapeHtml(expectedOutcome)}</p>${primaryPlaybook?.effectiveness_criteria ? `<div class="expected-evidence"><strong>Bukti efektivitas</strong><span>${escapeHtml(primaryPlaybook.effectiveness_criteria)}</span></div>` : ''}</section></div>
     <section class="diagnosis-tools"><div class="diagnosis-section-head"><div><h3>Tool yang Bisa Digunakan</h3><p>Tool berasal dari playbook terkait dan membantu konsultan menjalankan intervensi.</p></div><small>Playbook: ${suggestions.playbooks.map(item => `${item.code}@${item.version}`).join(', ') || '—'}</small></div>${suggestions.tools.length ? `<div class="toolkit-mini-grid">${suggestions.tools.slice(0,12).map(tool => `<article><div><strong>${escapeHtml(tool.name)}</strong><span>${escapeHtml(tool.purpose || '')}</span><small>${escapeHtml(tool.playbookCode)}</small></div><button type="button" class="btn btn-secondary btn-sm" data-open-diagnosis-tool="${escapeHtml(tool.code)}">Buka Tool</button></article>`).join('')}</div>` : '<p class="muted">Belum ada toolkit yang relevan dari rekomendasi internal.</p>'}</section>
     <section class="diagnosis-plan-fields"><div><h3>Siapkan Transformation Plan</h3><p>Tetapkan penanggung jawab dan target waktu sebelum bidang ini dimasukkan ke rencana perubahan.</p></div><div class="form-group"><label for="domainPlanPic">PIC</label><input class="input" id="domainPlanPic" value="${escapeHtml(existing?.selectedPIC || '')}" placeholder="Contoh: Kepala Unit"></div><div class="form-group"><label for="domainPlanDate">Target date</label><input class="input" id="domainPlanDate" type="date" value="${escapeHtml(existing?.targetDate || '')}"></div></section>
     <details class="diagnosis-requirement-details"><summary>Lihat requirement yang sudah terpenuhi</summary>${requirements.filter(item => item.completed).length ? `<ul class="requirement-list done">${requirements.filter(item => item.completed).map(item => `<li><strong>${escapeHtml(item.title)}</strong><span>${escapeHtml(item.condition)}</span></li>`).join('')}</ul>` : '<p class="muted">Belum ada requirement target yang didukung oleh cukup perspektif.</p>'}</details>
@@ -1111,7 +1108,7 @@ async function openDomainRecommendationModal(projectId, project, analytics, doma
     project,
     domainCode,
     domainName: summary.domainName,
-    summary,
+    summary: displaySummary,
     position,
     stage,
     targetStage,
@@ -1123,16 +1120,15 @@ async function openDomainRecommendationModal(projectId, project, analytics, doma
     expectedOutcome,
     tools: suggestions.tools,
     playbooks: suggestions.playbooks,
-    validatedMaturity,
   }));
   modal.querySelector('#domainRecommendationForm').addEventListener('submit', async event => {
     event.preventDefault();
     if (existing && !confirm(`${summary.domainName} sudah ada. Gabungkan analisis terbaru tanpa menghapus progress implementasi?`)) return;
-    const snapshot = buildDomainPlanSnapshot({ projectId, summary, requirements, selectedPIC: modal.querySelector('#domainPlanPic').value.trim(), targetDate: modal.querySelector('#domainPlanDate').value, suggestedPlaybooks: suggestions.playbooks, suggestedTools: suggestions.tools, sourceAnalysisVersion: `${project.instrumentVersion || 'V0.2'}:domain-gap-v1`, actor: state.user.uid, existing });
+    const snapshot = buildDomainPlanSnapshot({ projectId, summary: displaySummary, requirements, selectedPIC: modal.querySelector('#domainPlanPic').value.trim(), targetDate: modal.querySelector('#domainPlanDate').value, suggestedPlaybooks: suggestions.playbooks, suggestedTools: suggestions.tools, sourceAnalysisVersion: `${project.instrumentVersion || 'V0.2'}:domain-gap-v1`, actor: state.user.uid, existing });
     const { record } = addOrMergeDomainPlan(latestStored.domainPlans || {}, snapshot);
     const updates = {};
     updates[`projectTransformations/${projectId}/domainPlans/${domainCode}`] = record;
-    updates[`auditLogs/${projectId}/${Date.now()}`] = { action: existing ? 'MERGED_DOMAIN_PLAN' : 'ADDED_DOMAIN_PLAN', domainCode, currentMaturity: summary.currentMaturity, targetMaturity: summary.targetMaturity, actor: state.user.uid, at: now() };
+    updates[`auditLogs/${projectId}/${Date.now()}`] = { action: existing ? 'MERGED_DOMAIN_PLAN' : 'ADDED_DOMAIN_PLAN', domainCode, currentMaturity: displaySummary.currentMaturity, targetMaturity: displaySummary.targetMaturity, actor: state.user.uid, at: now() };
     await update(ref(db), updates);
     closeModal();
     showToast(existing ? 'Domain plan diperbarui tanpa menggandakan bidang.' : 'Bidang dimasukkan ke Transformation Plan.');
@@ -1208,7 +1204,7 @@ function downloadDiagnosisPdf(report) {
     const stats = [
       ['Rata-rata', scoreText(report.summary.average)], ['Terendah', scoreText(report.summary.min)],
       ['Tertinggi', scoreText(report.summary.max)], ['Perspektif', String(report.summary.respondentCount)],
-      [report.validatedMaturity ? 'Maturity terverifikasi' : 'Posisi perspektif', `Level ${report.position.displayLevel || '—'} - ${report.stage?.label || 'Belum ditentukan'}`],
+      ['Level saat ini', `Level ${report.position.displayLevel || '—'} - ${report.stage?.label || 'Belum ditentukan'}`],
     ];
     const statWidth = contentWidth / stats.length;
     stats.forEach(([label, value], index) => {
@@ -1219,7 +1215,7 @@ function downloadDiagnosisPdf(report) {
       doc.text(doc.splitTextToSize(value, statWidth - 6), x + 3, y + 7);
     });
     y += 23;
-    textBlock(`Nilai rata-rata menunjukkan ringkasan perspektif yang masuk. ${report.validatedMaturity ? 'Posisi maturity pada laporan ini telah diverifikasi konsultan.' : 'Posisi ini belum merupakan maturity terverifikasi konsultan.'}`, { size: 8.5 });
+    textBlock('Level saat ini mengikuti rentang nilai rata-rata seluruh perspektif yang masuk. Posisi desimalnya ditunjukkan oleh marker pada garis perjalanan.', { size: 8.5 });
 
     section('Tingkat Kematangan');
     const trackY = y + 4;
