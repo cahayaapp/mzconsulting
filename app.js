@@ -172,6 +172,10 @@ function environmentBadgeHtml() {
   return `<span class="environment-badge ${name.toLowerCase()}" title="Firebase project: ${escapeHtml(FIREBASE_ENVIRONMENT.projectId)}">${escapeHtml(name)}</span>`;
 }
 
+function domainVisualIcon(domainCode) {
+  return ({ D01: '◉', D02: '▥', D03: '♙', D04: '▤', D05: '♧', D06: '⌂', D07: '◫', D08: '◇', D09: '⌘', D10: '✓' })[domainCode] || '◎';
+}
+
 async function safeGet(path) {
   const snap = await get(ref(db, path));
   return snap.exists() ? snap.val() : null;
@@ -330,6 +334,7 @@ function consultantShell(content) {
             <div class="brand-mark">MZ</div>
             <div><div class="brand-title">MZ Consulting</div><div class="brand-sub">Sahabat Tumbuh Pesantren</div></div>
           </button>
+          <div class="brand-manifesto hide-mobile"><span></span><p>Data untuk Perubahan.<br>Bersama untuk Pesantren yang Lebih Baik</p></div>
           <div class="top-actions">
             <button class="btn btn-ghost btn-sm hide-mobile" id="toolkitLibraryBtn">Toolkit</button>
             <button class="btn btn-ghost btn-sm hide-mobile" id="knowledgeBaseBtn">Knowledge Base</button>
@@ -397,7 +402,7 @@ async function renderDashboard() {
       <section class="hero-panel">
         <div class="eyebrow" style="color:#d6b36a">Ruang kerja konsultan</div>
         <div class="page-head" style="margin:8px 0 0;align-items:center">
-          <div><h1 style="margin-bottom:10px">Asesmen yang ringan,<br>percakapan yang lebih tajam.</h1><p class="lead">Buat asesmen, pilih bidang, kumpulkan beberapa perspektif, lalu gunakan perbedaan pandangan sebagai bahan analisis awal.</p></div>
+          <div><h1 style="margin-bottom:10px">Ruang Transformasi,<br>Pesantren Indonesia.</h1><p class="lead">Buat asesmen, pilih bidang, kumpulkan beberapa perspektif, lalu gunakan perbedaan pandangan sebagai bahan analisis awal.</p></div>
           <button class="btn btn-secondary btn-lg" id="newProjectBtn">＋ Buat asesmen</button>
         </div>
       </section>
@@ -596,7 +601,7 @@ function maturityJourneyHtml(position, domainCode) {
     <div class="maturity-track" aria-hidden="true"></div>
     ${averageMarker != null ? `<span class="average-position-marker" style="left:${averageMarker}%" title="Average Perspektif ${scoreText(position.averagePerspective)}"></span>` : ''}
     <div class="current-position-marker" style="left:${marker}%;--marker:${marker}"><span class="current-marker-dot" aria-hidden="true">◆</span><strong>Posisi Saat Ini</strong></div>
-    <div class="maturity-points">${MATURITY_JOURNEY.map(stage => `<button type="button" class="maturity-point ${stage.level === position.displayLevel ? 'active' : ''}" data-maturity-point="${domainCode}:${stage.level}" aria-label="Level ${stage.level} — ${escapeHtml(stage.label)}: ${escapeHtml(stage.description)}"><span>${stage.level}</span><small>${escapeHtml(stage.label)}</small></button>`).join('')}</div>
+    <div class="maturity-points">${MATURITY_JOURNEY.map(stage => `<button type="button" class="maturity-point ${stage.level === position.displayLevel ? 'active' : stage.level < position.markerValue ? 'reached' : ''}" data-maturity-point="${domainCode}:${stage.level}" aria-label="Level ${stage.level} — ${escapeHtml(stage.label)}: ${escapeHtml(stage.description)}"><span>${stage.level}</span><small>${escapeHtml(stage.label)}</small></button>`).join('')}</div>
   </div>`;
 }
 
@@ -617,7 +622,7 @@ function domainMaturityCardHtml({ domain, summary, context, analytics }) {
   const missing = requirements.filter(item => !item.completed).length;
   const next = summary.targetMaturity ? MATURITY_JOURNEY[summary.targetMaturity - 1] : null;
   return `<article class="card maturity-domain-card">
-    <div class="maturity-domain-head"><div><span class="badge neutral">${domainCode}</span><h3>${escapeHtml(domain.title)}</h3></div><div class="maturity-summary"><strong>${scoreText(summary.average)}</strong><span>Average Perspektif</span></div></div>
+    <div class="maturity-domain-head"><div class="domain-identity"><span class="domain-visual-icon" aria-hidden="true">${domainVisualIcon(domainCode)}</span><div><span class="domain-sequence">${domainCode}</span><h3>${escapeHtml(domain.title)}</h3></div></div><div class="maturity-summary"><strong>${scoreText(summary.average)}</strong><span>Average Perspektif</span></div></div>
     <div class="maturity-stat-strip"><span><small>Terendah</small><strong>${scoreText(summary.min)}</strong></span><span><small>Tertinggi</small><strong>${scoreText(summary.max)}</strong></span><span><small>Perspektif</small><strong>${summary.respondentCount}</strong></span><span><small>Maturity</small><strong>Level ${position.displayLevel || '—'}</strong></span></div>
     ${maturityJourneyHtml(position, domainCode)}
     <div class="position-verification-label"><span aria-hidden="true">◎</span> ${escapeHtml(position.label)}${position.verifiedMaturity ? ` · Level ${position.verifiedMaturity}` : ''}</div>
@@ -642,7 +647,7 @@ async function renderMaturityOverview(projectId, project, analytics) {
       if (level) buckets[level] += 1;
     });
     const safety = context.recommendations.filter(item => item.safety_override);
-    slot.innerHTML = `<section class="maturity-map-head"><div><div class="eyebrow">Gambaran Awal</div><h2>Peta Perjalanan Pesantren</h2><p class="lead small">Menunjukkan posisi setiap bidang berdasarkan perspektif yang masuk. Tidak ada overall score dan tidak ada ranking lembaga.</p></div><div class="maturity-buckets">${MATURITY_JOURNEY.filter(stage => buckets[stage.level]).map(stage => `<span><strong>${buckets[stage.level]}</strong> bidang ${escapeHtml(stage.label)}</span>`).join('')}</div></section>
+    slot.innerHTML = `<section class="maturity-map-head"><div><div class="eyebrow">Hasil Diagnosis dan Arah Perbaikan</div><h2>Peta Perjalanan Pesantren</h2><p class="lead small">Menunjukkan posisi setiap bidang berdasarkan perspektif yang masuk, kondisi yang ditemukan, dan arah perbaikan menuju tahap berikutnya. Tidak ada overall score dan tidak ada ranking lembaga.</p></div><div class="maturity-buckets">${MATURITY_JOURNEY.filter(stage => buckets[stage.level]).map(stage => `<span><strong>${buckets[stage.level]}</strong> bidang ${escapeHtml(stage.label)}</span>`).join('')}</div></section>
       ${safety.length ? `<section class="safety-callout"><div><strong>Perhatian segera diperlukan</strong><p>${safety.length} sinyal keselamatan/risiko perlu ditangani melalui intervensi khusus. P0 bukan maturity level.</p></div><button class="btn btn-danger btn-sm" data-go-tab="interventions">Buka intervensi keselamatan</button></section>` : ''}
       <div class="maturity-domain-grid">${cards.join('')}</div>
       <section class="card card-pad overview-notes"><div><div class="eyebrow">Catatan konsultan</div><h3>Apa yang perlu dikonfirmasi dari gambaran ini?</h3><p class="helper">Catatan internal ini tidak mengubah maturity dan tidak ditampilkan kepada klien.</p></div><textarea class="textarea" id="analysisNote" placeholder="Tulis analisis awal setelah membaca hasil…">${escapeHtml(project.analysisNote || '')}</textarea><div class="overview-note-actions"><select class="select" id="engagementStatus">${['Belum dibahas','Tertarik didampingi','Akan lanjut sendiri','Belum melanjutkan'].map(v => `<option ${project.engagementStatus === v ? 'selected' : ''}>${v}</option>`).join('')}</select><button class="btn btn-primary btn-sm" id="saveAnalysis">Simpan catatan</button></div></section>`;
@@ -908,7 +913,8 @@ function interventionCardHtml(item) {
 function interventionPackageCardHtml(pkg) {
   const steps = toArray(pkg.playbook.intervention_steps);
   const validated = pkg.interventions.filter(item => item.consultantValidation?.status === 'VALIDATED').length;
-  return `<article class="card intervention-package-card ${pkg.recommendation.safety_override ? 'safety' : ''}" data-intervention-package-card="${pkg.domainCode}"><div class="package-card-head"><div><span class="badge neutral">${pkg.domainCode}</span><h3>${escapeHtml(pkg.domainName)}</h3></div>${pkg.recommendation.safety_override ? '<span class="priority-badge p0">P0 · Perhatian segera</span>' : `<span class="status-pill">${validated}/${pkg.interventions.length} divalidasi</span>`}</div><div class="package-playbook"><small>Playbook utama</small><strong>${escapeHtml(pkg.playbook.code)} — ${escapeHtml(pkg.playbook.title)}</strong><span>v${escapeHtml(pkg.playbook.version)}</span></div><ol class="package-step-preview">${steps.slice(0, 4).map(step => `<li><strong>${escapeHtml(step.step || step.stage || '')}</strong><span>${escapeHtml(step.activity || '')}</span></li>`).join('')}</ol>${steps.length > 4 ? `<p class="helper">＋ ${steps.length - 4} tahapan berikutnya</p>` : ''}<button class="btn btn-primary btn-sm" data-open-intervention-package="${pkg.domainCode}">Lihat Apa yang Harus Saya Lakukan</button></article>`;
+  const percent = pkg.interventions.length ? Math.round(validated / pkg.interventions.length * 100) : 0;
+  return `<article class="card intervention-package-card ${pkg.recommendation.safety_override ? 'safety' : ''}" data-intervention-package-card="${pkg.domainCode}" data-package-name="${escapeHtml(pkg.domainName.toLowerCase())}" data-package-status="${validated ? 'progress' : 'new'}"><div class="package-card-head"><div class="domain-identity"><span class="domain-visual-icon" aria-hidden="true">${domainVisualIcon(pkg.domainCode)}</span><div><span class="domain-sequence">${pkg.domainCode}</span><h3>${escapeHtml(pkg.domainName)}</h3></div></div><button class="card-arrow" data-open-intervention-package="${pkg.domainCode}" aria-label="Buka detail ${escapeHtml(pkg.domainName)}">›</button></div><div class="package-level-row"><strong>Level ${pkg.currentMaturity || 1} <span>→</span> Level ${Math.min(5, (pkg.currentMaturity || 1) + 1)}</strong><span>${steps.length} langkah intervensi</span></div><div class="package-progress-ring" style="--progress:${percent}"><strong>${percent}%</strong></div><button class="package-detail-link" data-open-intervention-package="${pkg.domainCode}">Lihat Detail <span>→</span></button>${pkg.recommendation.safety_override ? '<span class="priority-badge p0 package-risk">P0 · Perhatian segera</span>' : ''}</article>`;
 }
 
 function openInterventionPackageModal(projectId, project, analytics, pkg) {
@@ -917,7 +923,7 @@ function openInterventionPackageModal(projectId, project, analytics, pkg) {
   const support = pkg.interventions.filter(item => ['INTERVIEW','CLARIFICATION','DOCUMENT_REVIEW','OBSERVATION','WORKSHOP','TOOL_TEMPLATE','SPECIALIST_REFERRAL','VERIFICATION','EFFECTIVENESS_REVIEW'].includes(item.type));
   const modal = document.createElement('div');
   modal.className = 'modal-backdrop';
-  modal.innerHTML = `<div class="modal playbook-modal" role="dialog" aria-modal="true" aria-labelledby="packageTitle"><div class="modal-head"><div><div class="eyebrow">${pkg.domainCode} · ${escapeHtml(playbook.code)} · v${escapeHtml(playbook.version)}</div><h2 id="packageTitle">${escapeHtml(pkg.domainName)}</h2><p class="package-modal-subtitle">${escapeHtml(playbook.title)}</p></div><button type="button" class="icon-btn" data-close aria-label="Tutup dialog">×</button></div><div class="modal-body">
+  modal.innerHTML = `<div class="modal playbook-modal intervention-detail-modal" role="dialog" aria-modal="true" aria-labelledby="packageTitle"><div class="modal-head"><div><div class="eyebrow">${pkg.domainCode} · ${escapeHtml(playbook.code)} · v${escapeHtml(playbook.version)}</div><h2 id="packageTitle">${escapeHtml(pkg.domainName)}</h2><p class="package-modal-subtitle">${escapeHtml(playbook.title)}</p></div><button type="button" class="icon-btn" data-close aria-label="Tutup dialog">×</button></div><div class="modal-body">
     <section class="detail-section highlight"><h3>Mengapa bidang ini perlu ditangani</h3><p>${escapeHtml(pkg.recommendation.reason || playbook.purpose || '')}</p>${pkg.recommendation.evidence_warning ? '<span class="badge warn">Bukti perlu diperkuat</span>' : ''}</section>
     <section class="detail-section"><h3>Kondisi ideal</h3><p>${escapeHtml(playbook.ideal_condition || playbook.description || '')}</p></section>
     <section class="detail-section"><h3>Tahapan intervensi yang harus saya lakukan</h3><ol class="package-step-list">${steps.map((step, index) => `<li><div class="package-step-number">${index + 1}</div><div><strong>${escapeHtml(step.step || step.stage || `Tahap ${index + 1}`)}</strong><p>${escapeHtml(step.activity || '')}</p>${step.output ? `<small>Output: ${escapeHtml(step.output)}</small>` : ''}</div></li>`).join('')}</ol></section>
@@ -963,12 +969,12 @@ async function renderConsultantInterventions(projectId, project, analytics) {
     const items = Object.values(queue).sort((a, b) => Number(b.priority === 'P0') - Number(a.priority === 'P0') || INTERVENTION_STATUSES.indexOf(a.status) - INTERVENTION_STATUSES.indexOf(b.status));
     const packages = [...byDomain.entries()].map(([domainCode, value]) => {
       const domain = DOMAINS[Number(domainCode.replace('D', '')) - 1];
-      return { domainCode, domainName: domain?.title || value.playbook.domain_name || domainCode, ...value, interventions: items.filter(item => item.playbookCode === value.playbook.code) };
+      const summary = analytics.domainSummaries.find(item => item.domainCode === domainCode);
+      return { domainCode, domainName: domain?.title || value.playbook.domain_name || domainCode, currentMaturity: summary?.currentMaturity || 1, ...value, interventions: items.filter(item => item.playbookCode === value.playbook.code) };
     }).sort((a, b) => Number(b.recommendation.safety_override) - Number(a.recommendation.safety_override) || a.domainCode.localeCompare(b.domainCode));
     const oldFollowups = (await safeGet(`followups/${projectId}`)) || {};
-    slot.innerHTML = `<div class="section-head intervention-head"><div><div class="eyebrow">Workspace Konsultan</div><h2>Intervensi yang Harus Saya Lakukan</h2><p class="lead small">Pilih bidang untuk melihat urutan pekerjaan konsultan dari playbook terkait. Form wawancara, klarifikasi, workshop, dan toolkit tersedia di dalam detail bidang.</p></div><div class="queue-summary"><strong>${packages.length}</strong><span>bidang perlu ditangani</span></div></div>
+    slot.innerHTML = `<div class="section-head intervention-head"><div><div class="eyebrow">Workspace Konsultan</div><h2>Intervensi yang Harus Saya Lakukan</h2><p class="lead small">Pilih bidang untuk melihat urutan pekerjaan konsultan dari playbook terkait. Form wawancara, klarifikasi, workshop, dan toolkit tersedia di dalam detail bidang.</p></div><div class="intervention-toolbar"><label class="search-control"><span aria-hidden="true">⌕</span><input id="interventionSearch" placeholder="Cari bidang…"></label><select class="select" id="interventionStatusFilter"><option value="">Semua status</option><option value="new">Belum dimulai</option><option value="progress">Sudah divalidasi</option></select></div></div>
       ${items.some(item => item.priority === 'P0') ? '<div class="safety-callout"><div><strong>Intervensi safety diprioritaskan</strong><p>P0 ditampilkan terpisah dari maturity dan perlu ditangani sesuai batas kompetensi serta jalur rujukan.</p></div></div>' : ''}
-      <div class="intervention-filter"><select class="select" id="interventionDomainFilter"><option value="">Semua bidang</option>${packages.map(pkg => `<option value="${pkg.domainCode}">${pkg.domainCode} · ${escapeHtml(pkg.domainName)}</option>`).join('')}</select></div>
       ${packages.length ? `<div class="intervention-package-grid">${packages.map(interventionPackageCardHtml).join('')}</div>` : emptyHtml('Belum ada intervensi', 'Intervensi akan diturunkan dari playbook setelah hasil diagnosis menghasilkan rekomendasi yang relevan.')}
       ${Object.keys(oldFollowups).length ? `<details class="card internal-engine-panel"><summary>Tindak lanjut lama (${Object.keys(oldFollowups).length})</summary><div class="internal-engine-body"><p class="helper">Data lama dipertahankan untuk kompatibilitas dan tidak diubah menjadi intervensi secara otomatis.</p>${Object.values(oldFollowups).map(item => `<div class="legacy-followup"><strong>${escapeHtml(item.title)}</strong><span>${escapeHtml(item.action || '')}</span></div>`).join('')}</div></details>` : ''}`;
     bindInterventionQueue(projectId, project, analytics, queue, packages);
@@ -981,10 +987,12 @@ async function renderConsultantInterventions(projectId, project, analytics) {
 
 function bindInterventionQueue(projectId, project, analytics, queue, packages) {
   const filter = () => {
-    const domain = document.querySelector('#interventionDomainFilter')?.value || '';
-    document.querySelectorAll('[data-intervention-package-card]').forEach(card => { card.hidden = Boolean(domain && card.dataset.interventionPackageCard !== domain); });
+    const search = document.querySelector('#interventionSearch')?.value.trim().toLowerCase() || '';
+    const status = document.querySelector('#interventionStatusFilter')?.value || '';
+    document.querySelectorAll('[data-intervention-package-card]').forEach(card => { card.hidden = Boolean((search && !`${card.dataset.interventionPackageCard} ${card.dataset.packageName}`.includes(search)) || (status && card.dataset.packageStatus !== status)); });
   };
-  document.querySelector('#interventionDomainFilter')?.addEventListener('change', filter);
+  document.querySelector('#interventionSearch')?.addEventListener('input', filter);
+  document.querySelector('#interventionStatusFilter')?.addEventListener('change', filter);
   document.querySelectorAll('[data-open-intervention-package]').forEach(button => button.addEventListener('click', () => openInterventionPackageModal(projectId, project, analytics, packages.find(pkg => pkg.domainCode === button.dataset.openInterventionPackage))));
 }
 
@@ -1059,18 +1067,64 @@ async function openDomainRecommendationModal(projectId, project, analytics, doma
   const progress = progressOf(requirements);
   const suggestions = domainSuggestions(summary, context);
   const existing = latestStored.domainPlans?.[domainCode];
-  const stage = getStage(summary.currentMaturity);
+  const validatedMaturity = existing?.verifiedMaturity || (existing?.status === 'Terverifikasi' ? existing.targetMaturity : null);
+  const position = resolveMaturityPosition({ average: summary.average, validatedMaturity });
+  const stage = MATURITY_JOURNEY[(position.displayLevel || summary.currentMaturity || 1) - 1];
+  const targetStage = summary.targetMaturity ? MATURITY_JOURNEY[summary.targetMaturity - 1] : null;
+  const stats = analytics.questionStats.filter(item => item.domainId === domain.id).sort((a, b) => a.average - b.average);
+  const weakest = stats[0] ? getQuestion(stats[0].questionId)?.text : '';
+  const strongest = stats.at(-1) ? getQuestion(stats.at(-1).questionId)?.text : '';
+  const relatedRecommendations = context.recommendations.filter(item => context.knowledgeBase.playbooks.find(playbook => playbook.id === item.playbook_id)?.domain_code === domainCode);
+  const confidence = relatedRecommendations.some(item => item.evidence_warning) ? 'Low' : 'Normal';
+  const conditionNarrative = currentConditionNarrative({ summary, domainName: domain.title, strongestIndicator: strongest, weakestIndicator: weakest, perceptionGap: analytics.domainGaps[domain.id], evidenceConfidence: confidence, validatedMaturity });
+  const linkedPlaybooks = suggestions.playbooks.map(refItem => context.knowledgeBase.playbooks.find(item => item.code === refItem.code)).filter(Boolean);
+  const primaryPlaybook = linkedPlaybooks[0];
+  const interventionSteps = linkedPlaybooks.flatMap(playbook => toArray(playbook.intervention_steps).map(step => ({ ...step, playbookCode: playbook.code }))).slice(0, 8);
+  const expectedOutcome = primaryPlaybook?.ideal_condition || targetStage?.description || 'Perubahan perlu ditetapkan setelah evidence dan kondisi lapangan diverifikasi konsultan.';
+  const foundationText = strongest
+    ? `Fondasi yang paling kuat terlihat pada aspek “${strongest}”. Temuan ini menjadi modal awal, tetapi tetap perlu dikonfirmasi dengan bukti pelaksanaan.`
+    : 'Belum tersedia cukup jawaban untuk mengenali fondasi yang paling kuat. Konsultan perlu melakukan klarifikasi dan memeriksa bukti.';
   const modal = document.createElement('div');
   modal.className = 'modal-backdrop';
-  modal.innerHTML = `<div class="modal playbook-modal" role="dialog" aria-modal="true" aria-labelledby="domainRecommendationTitle"><div class="modal-head"><div><div class="eyebrow">${domainCode} · Rekomendasi Awal</div><h2 id="domainRecommendationTitle" style="margin:5px 0 0">${escapeHtml(summary.domainName)}</h2></div><button type="button" class="icon-btn" data-close aria-label="Tutup dialog">×</button></div><form id="domainRecommendationForm"><div class="modal-body">
+  modal.innerHTML = `<div class="modal diagnosis-report-modal" role="dialog" aria-modal="true" aria-labelledby="domainRecommendationTitle"><div class="modal-head diagnosis-report-head"><div class="diagnosis-domain-title"><span class="diagnosis-domain-icon" aria-hidden="true">${domainVisualIcon(domainCode)}</span><div><div class="eyebrow">${domainCode} · Hasil Diagnosis dan Arah Perbaikan</div><h2 id="domainRecommendationTitle">${escapeHtml(summary.domainName)}</h2><p>${escapeHtml(primaryPlaybook?.description || 'Ringkasan kondisi bidang berdasarkan seluruh perspektif yang sudah masuk.')}</p></div></div><div class="diagnosis-head-actions"><button type="button" class="btn btn-secondary btn-sm" id="downloadDiagnosisPdf">↓ Download PDF</button><button type="button" class="icon-btn" data-close aria-label="Tutup dialog">×</button></div></div><form id="domainRecommendationForm"><div class="modal-body diagnosis-report-body">
     ${existing ? '<div class="notice warn">Bidang ini sudah ada di Transformation Plan. Menyimpan kembali akan menggabungkan analisis terbaru dengan data implementasi yang sudah ada.</div>' : ''}
-    <section class="detail-section highlight"><h3>Kondisi saat ini</h3><p>${escapeHtml(stage?.description || 'Data belum cukup untuk menentukan kondisi.')}</p><div class="domain-stat-row modal-stats"><span><small>Average</small><strong>${scoreText(summary.average)}</strong></span><span><small>Min</small><strong>${scoreText(summary.min)}</strong></span><span><small>Max</small><strong>${scoreText(summary.max)}</strong></span><span><small>Perspektif</small><strong>${summary.respondentCount}</strong></span></div></section>
-    <section class="detail-section"><div class="next-level-head"><div><div class="eyebrow">Target berikutnya</div><h3>${summary.targetMaturity ? `Level ${summary.currentMaturity} → Level ${summary.targetMaturity}` : summary.currentMaturity === 5 ? 'Level 5 · level tertinggi' : 'Belum dapat ditentukan'}</h3></div><div class="readiness-ring"><strong>${progress.completed}/${progress.total}</strong><span>Kesiapan menuju level berikutnya</span></div></div></section>
-    <div class="grid grid-2 requirement-columns"><section class="detail-section"><h3>Sudah terpenuhi</h3>${requirements.filter(item => item.completed).length ? `<ul class="requirement-list done">${requirements.filter(item => item.completed).map(item => `<li><strong>${escapeHtml(item.title)}</strong><span>${escapeHtml(item.condition)}</span></li>`).join('')}</ul>` : '<p class="muted">Belum ada requirement target yang didukung oleh cukup perspektif.</p>'}</section><section class="detail-section"><h3>Masih perlu dilakukan</h3>${requirements.filter(item => !item.completed).length ? `<ul class="requirement-list missing">${requirements.filter(item => !item.completed).map(item => `<li><strong>${escapeHtml(item.title)}</strong><span>${escapeHtml(item.condition)}</span></li>`).join('')}</ul>` : '<p class="muted">Semua requirement target sudah didukung. Tetap perlukan verifikasi evidence.</p>'}</section></div>
-    <div class="grid grid-2"><div class="form-group"><label for="domainPlanPic">PIC</label><input class="input" id="domainPlanPic" value="${escapeHtml(existing?.selectedPIC || '')}" placeholder="Contoh: Kepala Unit"></div><div class="form-group"><label for="domainPlanDate">Target date</label><input class="input" id="domainPlanDate" type="date" value="${escapeHtml(existing?.targetDate || '')}"></div></div>
-    <section class="detail-section"><h3>Suggested tools/toolkits</h3>${suggestions.tools.length ? `<div class="toolkit-mini-grid">${suggestions.tools.slice(0,12).map(tool => `<div><strong>${escapeHtml(tool.name)}</strong><span>${escapeHtml(tool.purpose || '')}</span><small>${escapeHtml(tool.playbookCode)}</small></div>`).join('')}</div>` : '<p class="muted">Belum ada toolkit yang relevan dari rekomendasi internal.</p>'}<p class="helper">Playbook internal: ${suggestions.playbooks.map(item => item.code).join(', ') || '—'}</p></section>
+    <section class="diagnosis-stat-section"><div class="section-label">Ringkasan Hasil Audit</div><div class="diagnosis-stat-grid"><article><span class="stat-symbol blue">▥</span><small>Nilai Rata-rata</small><strong>${scoreText(summary.average)}</strong></article><article><span class="stat-symbol red">↓</span><small>Nilai Terendah</small><strong>${scoreText(summary.min)}</strong></article><article><span class="stat-symbol green">↑</span><small>Nilai Tertinggi</small><strong>${scoreText(summary.max)}</strong></article><article><span class="stat-symbol blue">♙</span><small>Jumlah Perspektif</small><strong>${summary.respondentCount}</strong></article><article><span class="stat-symbol gold">▤</span><small>Posisi ${validatedMaturity ? 'Terverifikasi' : 'Perspektif'}</small><strong>Level ${position.displayLevel || '—'}</strong><b>${escapeHtml(stage?.label || 'Belum ditentukan')}</b></article><aside><span aria-hidden="true">ⓘ</span><p>Angka ${scoreText(summary.average)} adalah rata-rata hasil asesmen dari seluruh perspektif yang masuk. Level kematangan ditetapkan setelah hasil ditelaah dan diverifikasi konsultan.</p></aside></div></section>
+    <section class="diagnosis-journey-panel"><h3>Tingkat Kematangan</h3>${maturityJourneyHtml(position, domainCode)}</section>
+    <div class="diagnosis-two-column"><section class="diagnosis-panel current"><h3><span>▤</span>Kondisi Saat Ini <b>Level ${position.displayLevel || '—'} — ${escapeHtml(stage?.label || 'Belum ditentukan')}</b></h3><p>${escapeHtml(conditionNarrative)}</p><p>${escapeHtml(stage?.description || '')}</p></section><section class="diagnosis-panel foundation"><h3><span>⌁</span>Fondasi yang Sudah Dimiliki</h3><p>${escapeHtml(foundationText)}</p></section></div>
+    <section class="diagnosis-improvement-panel"><div class="diagnosis-section-head"><h3><span>▲</span>Area yang Masih Perlu Diperbaiki</h3><p>Terdapat ${requirements.filter(item => !item.completed).length} area utama yang perlu menjadi perhatian.</p></div>${requirements.filter(item => !item.completed).length ? `<ol class="improvement-grid">${requirements.filter(item => !item.completed).map(item => `<li><span>${escapeHtml(item.title)}</span><small>${escapeHtml(item.condition)}</small></li>`).join('')}</ol>` : '<p class="muted">Semua requirement target sudah didukung. Evidence dan efektivitas tetap perlu diverifikasi.</p>'}</section>
+    <div class="diagnosis-direction-grid"><section class="diagnosis-panel target"><h3><span>▥</span>Target Perbaikan Berikutnya</h3><div class="level-shift">Level ${summary.currentMaturity || '—'} → Level ${summary.targetMaturity || '—'}</div><h4>${escapeHtml(targetStage?.label || 'Tahap berikutnya belum ditentukan')}</h4><p>${escapeHtml(domainMaturityDescription(linkedPlaybooks, summary.targetMaturity || position.displayLevel || 1).description)}</p><div class="readiness-summary"><strong>${progress.completed} dari ${progress.total}</strong><span>requirement menuju level berikutnya telah terpenuhi</span></div></section><section class="diagnosis-panel intervention"><h3><span>⚒</span>Intervensi yang Direkomendasikan</h3><p>${escapeHtml(primaryPlaybook?.purpose || 'Konsultan perlu memvalidasi langkah intervensi berdasarkan temuan dan bukti yang tersedia.')}</p>${interventionSteps.length ? `<ol class="intervention-step-preview">${interventionSteps.map(step => `<li><strong>${escapeHtml(step.step || step.title || 'Langkah intervensi')}</strong><span>${escapeHtml(step.activity || step.description || '')}</span>${step.output ? `<small>Output: ${escapeHtml(step.output)}</small>` : ''}</li>`).join('')}</ol>` : '<p class="muted">Belum ada tahapan intervensi yang sesuai.</p>'}</section><section class="diagnosis-panel outcome"><h3><span>◎</span>Hasil yang Diharapkan</h3><p>${escapeHtml(expectedOutcome)}</p>${primaryPlaybook?.effectiveness_criteria ? `<div class="expected-evidence"><strong>Bukti efektivitas</strong><span>${escapeHtml(primaryPlaybook.effectiveness_criteria)}</span></div>` : ''}</section></div>
+    <section class="diagnosis-tools"><div class="diagnosis-section-head"><div><h3>Tool yang Bisa Digunakan</h3><p>Tool berasal dari playbook terkait dan membantu konsultan menjalankan intervensi.</p></div><small>Playbook: ${suggestions.playbooks.map(item => `${item.code}@${item.version}`).join(', ') || '—'}</small></div>${suggestions.tools.length ? `<div class="toolkit-mini-grid">${suggestions.tools.slice(0,12).map(tool => `<article><div><strong>${escapeHtml(tool.name)}</strong><span>${escapeHtml(tool.purpose || '')}</span><small>${escapeHtml(tool.playbookCode)}</small></div><button type="button" class="btn btn-secondary btn-sm" data-open-diagnosis-tool="${escapeHtml(tool.code)}">Buka Tool</button></article>`).join('')}</div>` : '<p class="muted">Belum ada toolkit yang relevan dari rekomendasi internal.</p>'}</section>
+    <section class="diagnosis-plan-fields"><div><h3>Siapkan Transformation Plan</h3><p>Tetapkan penanggung jawab dan target waktu sebelum bidang ini dimasukkan ke rencana perubahan.</p></div><div class="form-group"><label for="domainPlanPic">PIC</label><input class="input" id="domainPlanPic" value="${escapeHtml(existing?.selectedPIC || '')}" placeholder="Contoh: Kepala Unit"></div><div class="form-group"><label for="domainPlanDate">Target date</label><input class="input" id="domainPlanDate" type="date" value="${escapeHtml(existing?.targetDate || '')}"></div></section>
+    <details class="diagnosis-requirement-details"><summary>Lihat requirement yang sudah terpenuhi</summary>${requirements.filter(item => item.completed).length ? `<ul class="requirement-list done">${requirements.filter(item => item.completed).map(item => `<li><strong>${escapeHtml(item.title)}</strong><span>${escapeHtml(item.condition)}</span></li>`).join('')}</ul>` : '<p class="muted">Belum ada requirement target yang didukung oleh cukup perspektif.</p>'}</details>
   </div><div class="modal-foot"><button type="button" class="btn btn-ghost" data-close>Batal</button><button class="btn btn-primary" type="submit" ${summary.targetMaturity ? '' : 'disabled'}>${existing ? 'Gabungkan ke Transformation Plan' : 'Masukkan ke Transformation Plan'}</button></div></form></div>`;
   const closeModal = mountModal(modal, '#domainPlanPic');
+  modal.querySelectorAll('[data-maturity-point]').forEach(button => button.addEventListener('click', () => {
+    const [, levelValue] = button.dataset.maturityPoint.split(':');
+    openMaturityStageModal(domainCode, Number(levelValue));
+  }));
+  modal.querySelectorAll('[data-open-diagnosis-tool]').forEach(button => button.addEventListener('click', () => {
+    const tool = suggestions.tools.find(item => item.code === button.dataset.openDiagnosisTool);
+    if (tool) openToolkitCard(tool);
+  }));
+  modal.querySelector('#downloadDiagnosisPdf')?.addEventListener('click', event => downloadDiagnosisPdf({
+    button: event.currentTarget,
+    project,
+    domainCode,
+    domainName: summary.domainName,
+    summary,
+    position,
+    stage,
+    targetStage,
+    conditionNarrative,
+    foundationText,
+    requirements,
+    progress,
+    interventionSteps,
+    expectedOutcome,
+    tools: suggestions.tools,
+    playbooks: suggestions.playbooks,
+    validatedMaturity,
+  }));
   modal.querySelector('#domainRecommendationForm').addEventListener('submit', async event => {
     event.preventDefault();
     if (existing && !confirm(`${summary.domainName} sudah ada. Gabungkan analisis terbaru tanpa menghapus progress implementasi?`)) return;
@@ -1084,6 +1138,141 @@ async function openDomainRecommendationModal(projectId, project, analytics, doma
     showToast(existing ? 'Domain plan diperbarui tanpa menggandakan bidang.' : 'Bidang dimasukkan ke Transformation Plan.');
     renderProject(projectId, 'transformation');
   });
+}
+
+function downloadDiagnosisPdf(report) {
+  const PdfDocument = window.jspdf?.jsPDF;
+  if (!PdfDocument) {
+    showToast('Generator PDF belum termuat. Periksa koneksi lalu coba lagi.', 'error');
+    return;
+  }
+  const button = report.button;
+  setButtonLoading(button, true, 'Menyiapkan PDF…');
+  try {
+    const doc = new PdfDocument({ unit: 'mm', format: 'a4', orientation: 'portrait' });
+    const pageWidth = doc.internal.pageSize.getWidth();
+    const pageHeight = doc.internal.pageSize.getHeight();
+    const margin = 16;
+    const contentWidth = pageWidth - margin * 2;
+    const green = [9, 88, 68];
+    const dark = [18, 48, 41];
+    const muted = [76, 98, 91];
+    const pale = [238, 247, 243];
+    let y = 18;
+    const newPage = () => { doc.addPage(); y = 18; };
+    const ensure = height => { if (y + height > pageHeight - 18) newPage(); };
+    const textBlock = (text, { size = 9.5, color = muted, bold = false, indent = 0, gap = 4, maxWidth = contentWidth - indent } = {}) => {
+      doc.setFont('helvetica', bold ? 'bold' : 'normal');
+      doc.setFontSize(size);
+      doc.setTextColor(...color);
+      const lines = doc.splitTextToSize(String(text || '—'), maxWidth);
+      const height = Math.max(5, lines.length * (size * .38));
+      ensure(height + gap);
+      doc.text(lines, margin + indent, y);
+      y += height + gap;
+    };
+    const section = title => {
+      ensure(15);
+      if (y > 22) y += 3;
+      doc.setFillColor(...pale);
+      doc.roundedRect(margin, y - 5, contentWidth, 10, 2, 2, 'F');
+      doc.setFont('helvetica', 'bold'); doc.setFontSize(11); doc.setTextColor(...green);
+      doc.text(title, margin + 4, y + 1.5);
+      y += 11;
+    };
+    const numbered = (items, formatter) => items.forEach((item, index) => {
+      const value = formatter(item, index);
+      ensure(12);
+      doc.setFillColor(159, 207, 187); doc.circle(margin + 4, y - 1, 3.2, 'F');
+      doc.setFont('helvetica', 'bold'); doc.setFontSize(8); doc.setTextColor(255,255,255); doc.text(String(index + 1), margin + 4, y, { align: 'center' });
+      textBlock(value.title, { bold: true, color: dark, indent: 10, gap: 1, maxWidth: contentWidth - 10 });
+      if (value.detail) textBlock(value.detail, { size: 8.5, indent: 10, gap: 3, maxWidth: contentWidth - 10 });
+    });
+
+    doc.setFillColor(...green); doc.roundedRect(margin, y - 7, 22, 22, 4, 4, 'F');
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(14); doc.setTextColor(255,255,255); doc.text('MZ', margin + 11, y + 6, { align: 'center' });
+    doc.setTextColor(...green); doc.setFontSize(10); doc.text('MZ CONSULTING', margin + 28, y - 1);
+    doc.setTextColor(...muted); doc.setFont('helvetica', 'normal'); doc.setFontSize(7.5); doc.text('Sahabat Tumbuh Pesantren', margin + 28, y + 4);
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(8); doc.setTextColor(...green); doc.text('HASIL DIAGNOSIS DAN ARAH PERBAIKAN', pageWidth - margin, y - 1, { align: 'right' });
+    doc.setFont('helvetica', 'normal'); doc.setTextColor(...muted); doc.text(report.project.pesantren || report.project.name || '', pageWidth - margin, y + 4, { align: 'right' });
+    y += 23;
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(11); doc.setTextColor(...green); doc.text(report.domainCode, margin, y);
+    y += 8;
+    doc.setFontSize(23); doc.setTextColor(...dark); doc.text(report.domainName, margin, y);
+    y += 8;
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(8.5); doc.setTextColor(...muted);
+    doc.text(`Periode: ${report.project.period || '—'}  |  Dibuat: ${new Intl.DateTimeFormat('id-ID',{dateStyle:'long'}).format(new Date())}`, margin, y);
+    y += 10;
+
+    section('Ringkasan Hasil Audit');
+    const stats = [
+      ['Rata-rata', scoreText(report.summary.average)], ['Terendah', scoreText(report.summary.min)],
+      ['Tertinggi', scoreText(report.summary.max)], ['Perspektif', String(report.summary.respondentCount)],
+      [report.validatedMaturity ? 'Maturity terverifikasi' : 'Posisi perspektif', `Level ${report.position.displayLevel || '—'} - ${report.stage?.label || 'Belum ditentukan'}`],
+    ];
+    const statWidth = contentWidth / stats.length;
+    stats.forEach(([label, value], index) => {
+      const x = margin + index * statWidth;
+      doc.setFillColor(248,250,249); doc.roundedRect(x, y - 5, statWidth - 2, 19, 2, 2, 'F');
+      doc.setFont('helvetica','normal'); doc.setFontSize(7); doc.setTextColor(...muted); doc.text(label, x + 3, y);
+      doc.setFont('helvetica','bold'); doc.setFontSize(index === stats.length - 1 ? 8.5 : 14); doc.setTextColor(...dark);
+      doc.text(doc.splitTextToSize(value, statWidth - 6), x + 3, y + 7);
+    });
+    y += 23;
+    textBlock(`Nilai rata-rata menunjukkan ringkasan perspektif yang masuk. ${report.validatedMaturity ? 'Posisi maturity pada laporan ini telah diverifikasi konsultan.' : 'Posisi ini belum merupakan maturity terverifikasi konsultan.'}`, { size: 8.5 });
+
+    section('Tingkat Kematangan');
+    const trackY = y + 4;
+    doc.setDrawColor(190,205,199); doc.setLineWidth(1); doc.line(margin + 8, trackY, pageWidth - margin - 8, trackY);
+    const marker = report.position.markerValue;
+    MATURITY_JOURNEY.forEach((item, index) => {
+      const x = margin + 8 + index * ((contentWidth - 16) / 4);
+      const active = item.level === report.position.displayLevel;
+      doc.setFillColor(...(active ? [199,156,72] : item.level < marker ? green : [226,234,231]));
+      doc.circle(x, trackY, active ? 4.5 : 3.8, 'F');
+      doc.setFont('helvetica','bold'); doc.setFontSize(7); doc.setTextColor(...(active || item.level < marker ? [255,255,255] : muted)); doc.text(String(item.level), x, trackY + 1, { align:'center' });
+      doc.setFont('helvetica','normal'); doc.setFontSize(6.5); doc.setTextColor(...muted); doc.text(doc.splitTextToSize(item.label, 28), x, trackY + 8, { align:'center' });
+    });
+    y += 25;
+
+    section('Kondisi Saat Ini');
+    textBlock(report.conditionNarrative, { color: dark });
+    section('Fondasi yang Sudah Dimiliki');
+    textBlock(report.foundationText, { color: dark });
+    section('Area yang Masih Perlu Diperbaiki');
+    const missing = report.requirements.filter(item => !item.completed);
+    if (missing.length) numbered(missing, item => ({ title: item.title, detail: item.condition }));
+    else textBlock('Seluruh requirement target telah didukung. Evidence dan efektivitas tetap perlu diverifikasi.');
+
+    section('Target Perbaikan Berikutnya');
+    textBlock(`Level ${report.summary.currentMaturity || '—'} ke Level ${report.summary.targetMaturity || '—'} - ${report.targetStage?.label || 'Tahap berikutnya belum ditentukan'}`, { size: 12, bold: true, color: dark, gap: 2 });
+    textBlock(`${report.progress.completed} dari ${report.progress.total} requirement menuju level berikutnya telah terpenuhi.`);
+    section('Intervensi yang Direkomendasikan');
+    if (report.interventionSteps.length) numbered(report.interventionSteps, item => ({ title: item.step || item.title || 'Langkah intervensi', detail: `${item.activity || item.description || ''}${item.output ? ` Output: ${item.output}.` : ''}` }));
+    else textBlock('Tahapan intervensi perlu ditetapkan konsultan setelah klarifikasi dan pemeriksaan bukti.');
+    section('Hasil yang Diharapkan');
+    textBlock(report.expectedOutcome, { color: dark });
+    section('Tool yang Bisa Digunakan');
+    if (report.tools.length) numbered(report.tools, item => ({ title: item.name, detail: `${item.purpose || ''}${item.playbookCode ? ` Sumber: ${item.playbookCode}.` : ''}` }));
+    else textBlock('Belum ada toolkit yang relevan dari rekomendasi internal.');
+    textBlock(`Playbook sumber: ${report.playbooks.map(item => `${item.code}@${item.version}`).join(', ') || '—'}`, { size: 7.5 });
+
+    const pages = doc.getNumberOfPages();
+    for (let page = 1; page <= pages; page++) {
+      doc.setPage(page); doc.setDrawColor(220,230,226); doc.line(margin, pageHeight - 11, pageWidth - margin, pageHeight - 11);
+      doc.setFont('helvetica','normal'); doc.setFontSize(7); doc.setTextColor(...muted);
+      doc.text('MZ Consulting - Sahabat Tumbuh Pesantren', margin, pageHeight - 6);
+      doc.text(`Halaman ${page} dari ${pages}`, pageWidth - margin, pageHeight - 6, { align:'right' });
+    }
+    const filename = `${report.project.pesantren || 'Pesantren'}-${report.domainCode}-Hasil-Diagnosis.pdf`.replace(/[^a-z0-9._-]+/gi, '-').replace(/-+/g, '-');
+    doc.save(filename);
+    showToast('PDF hasil diagnosis berhasil dibuat.');
+  } catch (error) {
+    console.error(error);
+    showToast('PDF belum berhasil dibuat. Coba lagi setelah halaman selesai dimuat.', 'error');
+  } finally {
+    setButtonLoading(button, false);
+  }
 }
 
 async function getTransformationContext(projectId, analytics) {
@@ -1602,13 +1791,13 @@ async function renderProject(projectId, tab = state.currentTab || 'overview') {
   const domains = selectedDomains(project);
 
   appEl.innerHTML = consultantShell(`
-    <main class="page"><div class="container">
+    <main class="page project-page"><div class="container project-container">
       <button class="breadcrumb" id="backDashboard" style="border:0;background:none;padding:0">← Kembali ke semua asesmen</button>
       <div class="project-hero">
         <div><div class="eyebrow">${escapeHtml(project.name || 'Asesmen')}</div><h1 class="project-title">${escapeHtml(project.pesantren)}</h1><div class="project-meta"><span>${domains.length} bidang</span><span>${Object.keys(project.perspectives || {}).length} perspektif</span><span>${escapeHtml(project.period || 'Tanpa periode')}</span></div></div>
-        <div><span class="badge ${analytics.submittedCount ? 'success' : 'neutral'}">${analytics.submittedCount} jawaban masuk</span></div>
+        <div class="project-hero-aside"><span class="badge ${analytics.submittedCount ? 'success' : 'neutral'}">${analytics.submittedCount} jawaban masuk</span><blockquote>Langkah kecil hari ini, dampak besar untuk generasi esok.</blockquote></div>
       </div>
-      <div class="tabs">${tabButton('overview','Gambaran Awal',tab)}${tabButton('perspectives','Perspektif',tab)}${tabButton('compare','Bandingkan',tab)}${tabButton('recommendations','Rekomendasi Awal',tab)}${tabButton('interventions','Intervensi yang Harus Saya Lakukan',tab === 'followup' ? 'interventions' : tab)}${tabButton('transformation','Transformation Plan',tab)}</div>
+      <div class="tabs">${tabButton('overview','Hasil Diagnosis dan Arah Perbaikan',tab)}${tabButton('perspectives','Perspektif',tab)}${tabButton('compare','Bandingkan',tab)}${tabButton('recommendations','Rekomendasi Awal',tab)}${tabButton('interventions','Intervensi yang Harus Saya Lakukan',tab === 'followup' ? 'interventions' : tab)}${tabButton('transformation','Transformation Plan',tab)}</div>
       <div id="projectContent">${renderProjectTab(projectId, project, bundle, analytics, tab)}</div>
     </div></main>`);
   bindShell();
